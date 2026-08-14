@@ -58,7 +58,7 @@ describe("toInternalAppPath", () => {
 
   it("keeps pre-workspace and root paths external — they are not workspace pages", () => {
     expect(toInternalAppPath(`${APP_ORIGIN}/login`, APP_ORIGIN)).toBeNull();
-    expect(toInternalAppPath(`${APP_ORIGIN}/auth/callback`, APP_ORIGIN)).toBeNull();
+    expect(toInternalAppPath(`${APP_ORIGIN}/login/callback`, APP_ORIGIN)).toBeNull();
     expect(toInternalAppPath(`${APP_ORIGIN}/`, APP_ORIGIN)).toBeNull();
   });
 

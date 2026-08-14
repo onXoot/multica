@@ -80,11 +80,11 @@ services:
       SMTP_EHLO_NAME: ${SMTP_EHLO_NAME:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/login/callback}
       OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
-      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3000/login/callback}
       OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-OpenID Connect}
       OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
       OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}

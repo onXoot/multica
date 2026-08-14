@@ -82,7 +82,7 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 2. Multica 프런트엔드의 callback 주소를 **Authorized redirect URIs**에 추가합니다.
 
    ```text
-   https://multica.example.com/auth/callback
+   https://multica.example.com/login/callback
    ```
 
 3. 다음을 설정합니다.
@@ -90,7 +90,7 @@ MULTICA_DEV_VERIFICATION_CODE=888888
    ```dotenv
    GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+   GOOGLE_REDIRECT_URI=https://multica.example.com/login/callback
    ```
 
 4. API 서비스를 다시 시작합니다.

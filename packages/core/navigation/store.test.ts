@@ -13,7 +13,7 @@ describe("useNavigationStore.lastPath excludes global paths", () => {
       "/signup",
       "/workspaces/new",
       "/invite/abc",
-      "/auth/callback",
+      "/login/callback",
     ];
 
     for (const path of globalPrefixes) {

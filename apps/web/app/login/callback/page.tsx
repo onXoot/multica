@@ -42,7 +42,7 @@ function CallbackContent() {
     }
 
     const state = searchParams.get("state") || "";
-    const redirectUri = `${window.location.origin}/auth/callback`;
+    const redirectUri = `${window.location.origin}/login/callback`;
 
     const parseAppState = (appState: string) => {
       const stateParts = appState.split(",");

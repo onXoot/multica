@@ -78,7 +78,7 @@ func loadOIDCRuntimeConfig() (oidcRuntimeConfig, error) {
 		ProviderName:         strings.TrimSpace(os.Getenv("OIDC_PROVIDER_NAME")),
 		AllowedGroups:        splitCommaSeparated(os.Getenv("OIDC_ALLOWED_GROUPS")),
 		GroupsClaim:          strings.TrimSpace(os.Getenv("OIDC_GROUPS_CLAIM")),
-		RequireVerifiedEmail: os.Getenv("OIDC_REQUIRE_VERIFIED_EMAIL") != "false",
+		RequireVerifiedEmail: !strings.EqualFold(strings.TrimSpace(os.Getenv("OIDC_REQUIRE_VERIFIED_EMAIL")), "false"),
 	}
 	if cfg.IssuerURL == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURI == "" {
 		return oidcRuntimeConfig{}, errors.New("OIDC is not configured")
