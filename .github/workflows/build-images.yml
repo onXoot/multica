@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # GHCR 要求镜像仓库名全小写；表达式不支持大小写转换函数，用 shell 转换后写入环境变量。
       # github.repository 形如 "onXoot/multica"，转小写后为 "onxoot/multica"。
@@ -30,7 +30,7 @@ jobs:
           echo "DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           # GITHUB_TOKEN 登录 GHCR 时，用户名必须是仓库属主（允许大写）
@@ -39,7 +39,7 @@ jobs:
 
       # 后端镜像（server/Dockerfile -> 根目录 Dockerfile）
       - name: Build and push backend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -52,7 +52,7 @@ jobs:
 
       # 前端镜像（apps/web/Dockerfile.web -> 根目录 Dockerfile.web）
       - name: Build and push web
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.web
