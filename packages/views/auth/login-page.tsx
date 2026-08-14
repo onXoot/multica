@@ -395,9 +395,6 @@ export function LoginPage({
           <CardTitle className="text-display-sm">
             {t(($) => $.signin.title)}
           </CardTitle>
-          <CardDescription>
-            {t(($) => $.signin.description)}
-          </CardDescription>
         </CardHeader>
         <CardContent>
           {error && (
