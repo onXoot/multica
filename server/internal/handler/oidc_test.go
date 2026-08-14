@@ -181,7 +181,9 @@ func TestValidOIDCURL(t *testing.T) {
 		"http://localhost:9000/application/o/multica":    true,
 		"http://127.0.0.1:9000":                          true,
 		"http://[::1]:9000":                              true,
-		"http://auth.example.com":                        false,
+		// Fork relaxation: plain-HTTP public URLs are accepted so OIDC can
+		// run against a bare IP without TLS. See validOIDCURL.
+		"http://auth.example.com":                        true,
 		"file://localhost/tmp/provider":                  false,
 	}
 	for raw, want := range tests {
