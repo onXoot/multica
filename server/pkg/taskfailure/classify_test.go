@@ -84,6 +84,11 @@ func TestClassifyRules(t *testing.T) {
 		{"rate limit", "rate limit exceeded for tier 3", ReasonAgentProviderCapacityOrRateLimit},
 		{"overloaded", "overloaded_error: please retry", ReasonAgentProviderCapacityOrRateLimit},
 		{"no capacity available", "no capacity available; try again later", ReasonAgentProviderCapacityOrRateLimit},
+		{"codex selected model at capacity", "Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
+		{"codex capacity uppercase stays model unavailable", "SELECTED MODEL IS AT CAPACITY. PLEASE TRY A DIFFERENT MODEL.", ReasonAgentModelNotFoundOrUnavailable},
+		{"codex capacity leading whitespace stays model unavailable", " Selected model is at capacity. Please try a different model.", ReasonAgentModelNotFoundOrUnavailable},
+		{"codex capacity trailing whitespace stays model unavailable", "Selected model is at capacity. Please try a different model. ", ReasonAgentModelNotFoundOrUnavailable},
+		{"codex capacity near-match stays model unavailable", "Selected model is at capacity. Please try a different model. Contact support if this persists.", ReasonAgentModelNotFoundOrUnavailable},
 
 		// 6. Provider 5xx / server error.
 		{"server had an error", "the server had an error processing your request", ReasonAgentProviderServerError},
@@ -121,6 +126,14 @@ func TestClassifyRules(t *testing.T) {
 		{"opencode continuation never started", "opencode stream ended without a terminal signal (last step required a continuation that never started)", ReasonAgentProviderNetwork},
 		{"opencode empty final step", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing", ReasonAgentProviderNetwork},
 		{"opencode empty step with process exit appended", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing; opencode exited with error: exit status 1", ReasonAgentProviderNetwork},
+		// BHD-135: Pi's OpenAI-compatible SDK wording for a dropped LiteLLM
+		// call. Bare strings, then the same strings glued to "exit status 1"
+		// after pi-print-clean-exit forces a non-zero wrap-up.
+		{"pi connection error", "Connection error.", ReasonAgentProviderNetwork},
+		{"pi connection error with exit status wins over process failure", "Connection error.; pi exited with error: exit status 1", ReasonAgentProviderNetwork},
+		{"pi request timed out", "Request timed out.", ReasonAgentProviderNetwork},
+		{"pi request timed out with exit status wins over process failure", "Request timed out.; pi exited with error: exit status 1", ReasonAgentProviderNetwork},
+		{"omp connection error with exit status wins over process failure", "Connection error.; omp exited with error: exit status 1", ReasonAgentProviderNetwork},
 
 		// 8. Model not found / unavailable.
 		{"model not found", "Error: model claude-3-opus-99 not found", ReasonAgentModelNotFoundOrUnavailable},
@@ -139,6 +152,7 @@ func TestClassifyRules(t *testing.T) {
 
 		// 11. Runtime missing executable.
 		{"executable not found", "executable not found in $PATH", ReasonAgentRuntimeMissingExecutable},
+		{"exec format error", "start claude: fork/exec /usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe: exec format error", ReasonAgentRuntimeMissingExecutable},
 
 		// 12. Runtime version unsupported.
 		{"below the minimum supported version", "claude CLI 0.1.0 is below the minimum supported version 0.5.0", ReasonAgentRuntimeVersionUnsupported},
@@ -157,6 +171,12 @@ func TestClassifyRules(t *testing.T) {
 		// 14. Catchall.
 		{"unrecognized", "the agent gave up for reasons unknown", ReasonAgentUnknown},
 		{"sentence with no marker", "Hello world.", ReasonAgentUnknown},
+		// Pi's two short provider messages must not become broad substring
+		// matches: local tool and MCP failures are deterministic and retrying
+		// them only repeats the same failure.
+		{"local tool connection error is not provider network", "local tool connection error while opening its database", ReasonAgentUnknown},
+		{"mcp request timeout is not provider network", "MCP server request timed out while loading configuration", ReasonAgentUnknown},
+		{"local connection error with exit remains process failure", "MCP server connection error; agent exited with error: exit status 1", ReasonAgentProcessFailure},
 
 		// 15. Digit-boundary regression: 3-digit HTTP status codes must NOT
 		//     match when embedded in a longer number. Before the fix these
@@ -367,6 +387,53 @@ func TestNormalizeDaemonReason(t *testing.T) {
 			want:   Reason(""),
 		},
 
+		// --- COM-54: Codex model-capacity failures. Daemons whose
+		// classifier predates the dedicated capacity witness report the exact
+		// message as model_not_found_or_unavailable because it contains
+		// "selected model". Upgrade that stale non-empty label server-side.
+		{
+			name:   "old daemon model-unavailable guess on codex capacity is upgraded",
+			reason: string(ReasonAgentModelNotFoundOrUnavailable),
+			raw:    "Selected model is at capacity. Please try a different model.",
+			want:   ReasonAgentProviderCapacityOrRateLimit,
+		},
+		{
+			name:   "old daemon catchall on codex capacity is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    "Selected model is at capacity. Please try a different model.",
+			want:   ReasonAgentProviderCapacityOrRateLimit,
+		},
+		{
+			name:   "pre-MUL-1949 coarse reason on codex capacity is upgraded",
+			reason: "agent_error",
+			raw:    "Selected model is at capacity. Please try a different model.",
+			want:   ReasonAgentProviderCapacityOrRateLimit,
+		},
+		{
+			name:   "codex capacity uppercase is not upgraded",
+			reason: string(ReasonAgentModelNotFoundOrUnavailable),
+			raw:    "SELECTED MODEL IS AT CAPACITY. PLEASE TRY A DIFFERENT MODEL.",
+			want:   ReasonAgentModelNotFoundOrUnavailable,
+		},
+		{
+			name:   "codex capacity with surrounding whitespace is not upgraded",
+			reason: string(ReasonAgentModelNotFoundOrUnavailable),
+			raw:    " Selected model is at capacity. Please try a different model. ",
+			want:   ReasonAgentModelNotFoundOrUnavailable,
+		},
+		{
+			name:   "unrelated refined reason with codex capacity text is left alone",
+			reason: string(ReasonAgentProviderAuthOrAccess),
+			raw:    "401 Unauthorized: Selected model is at capacity.",
+			want:   ReasonAgentProviderAuthOrAccess,
+		},
+		{
+			name:   "capacity near-match is not upgraded",
+			reason: string(ReasonAgentModelNotFoundOrUnavailable),
+			raw:    "Selected model is at capacity. Please try a different model. Contact support if this persists.",
+			want:   ReasonAgentModelNotFoundOrUnavailable,
+		},
+
 		// --- GH #6360: response-side context overflow. An un-upgraded daemon
 		// classifies the wordings below as the catchall, which is on no resume
 		// blacklist — so without this the over-full session stays pinned and
@@ -495,5 +562,74 @@ func TestProviderUnconfiguredAgreesWithClassify(t *testing.T) {
 	}
 	if got := Classify(errText); got != ReasonAgentMissingConfig {
 		t.Errorf("Classify(%q) = %q, want %q", errText, got, ReasonAgentMissingConfig)
+	}
+}
+
+// TestNormalizeDaemonReasonUpgradesOpenclawCLITimeout covers the mixed-version
+// window for #7112. A daemon that predates the timeout sentinel classifies the
+// failure from its text and lands on agent_error.provider_network, which is
+// worse than merely imprecise: that reason is on the auto-retry allowlist, so
+// every attempt re-pays the same 8-11s stall and fails identically, and the
+// chat bubble tells the user to check a network that was never involved.
+// Recognising the wire shape fixes both the moment the server deploys.
+func TestNormalizeDaemonReasonUpgradesOpenclawCLITimeout(t *testing.T) {
+	t.Parallel()
+
+	const rawError = "prepare execution environment: execenv: prepare openclaw config: " +
+		"locate openclaw active config: openclaw config file: context deadline exceeded " +
+		"(process: signal: killed)"
+
+	for _, legacy := range []string{
+		string(ReasonAgentProviderNetwork),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(legacy, rawError); got != ReasonRuntimeCLITimeout {
+			t.Errorf("NormalizeDaemonReason(%q, openclaw timeout) = %q, want %q", legacy, got, ReasonRuntimeCLITimeout)
+		}
+	}
+
+	// A current daemon already reports the precise reason; normalization must
+	// leave it alone.
+	if got := NormalizeDaemonReason(string(ReasonRuntimeCLITimeout), rawError); got != ReasonRuntimeCLITimeout {
+		t.Errorf("NormalizeDaemonReason(runtime_cli_timeout) = %q, want it preserved", got)
+	}
+
+	// Both witnesses are required. A real provider-side deadline, and an
+	// openclaw prep failure that is not a timeout, must keep their own
+	// classification — the global "deadline exceeded" rule still belongs to
+	// genuine network stalls.
+	unrelated := map[string]struct {
+		reason   string
+		rawError string
+		want     Reason
+	}{
+		"provider deadline stays provider_network": {
+			reason:   string(ReasonAgentProviderNetwork),
+			rawError: "API Error: context deadline exceeded while streaming from provider",
+			want:     ReasonAgentProviderNetwork,
+		},
+		"openclaw prep failure without a timeout is untouched": {
+			reason:   string(ReasonAgentUnknown),
+			rawError: "execenv: prepare openclaw config: read openclaw agents.list: exit status 1",
+			want:     ReasonAgentUnknown,
+		},
+	}
+	for name, tc := range unrelated {
+		if got := NormalizeDaemonReason(tc.reason, tc.rawError); got != tc.want {
+			t.Errorf("%s: NormalizeDaemonReason = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// TestClassifyKeepsDeadlineExceededAsProviderNetwork pins the rule the fix
+// deliberately did NOT touch. Local runtime CLI timeouts are recognised
+// structurally, upstream of Classify; the text rule still has to serve real
+// provider stalls, which are transient and retryable.
+func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
+	t.Parallel()
+
+	if got := Classify("post to provider: context deadline exceeded"); got != ReasonAgentProviderNetwork {
+		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
 	}
 }

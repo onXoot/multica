@@ -10,6 +10,11 @@
     "task_list": "待办列表",
     "quote": "引用",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "应用链接",
+      "remove": "移除链接",
+      "close": "关闭链接编辑器"
+    },
     "heading_dropdown": {
       "text": "正文",
       "normal_text": "正文",
@@ -86,7 +91,14 @@
     "copy_code": "复制代码",
     "show_preview": "显示预览",
     "show_source": "显示源码",
-    "fullscreen": "放大"
+    "fullscreen": "放大",
+    "edit_preview": "编辑实时预览",
+    "live_workspace": "实时预览工作区",
+    "editor_label": "HTML 编辑器",
+    "local_draft": "本地草稿",
+    "original": "原始版本",
+    "reset_changes": "重置更改",
+    "copy_changes": "复制更改"
   },
   "file_card": {
     "uploading": "正在上传 {{filename}}"
