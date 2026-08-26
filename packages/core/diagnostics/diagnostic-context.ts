@@ -84,6 +84,7 @@ const WORKSPACE_ROUTES: readonly RoutePattern[] = [
 
 const GLOBAL_ROUTES: readonly RoutePattern[] = [
   ["login"],
+  ["login", "callback"],
   ["signup"],
   ["logout"],
   ["workspaces", "new"],
