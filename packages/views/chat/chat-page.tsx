@@ -33,6 +33,7 @@ import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
+import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 
 /**
@@ -267,6 +268,7 @@ export function ChatPage() {
             !!c.pendingTaskId ||
             c.isSessionArchived ||
             c.isAgentArchived ||
+            c.isAgentAccessRevoked ||
             !c.isAgentRuntimeBound ||
             c.noAgent
           }
@@ -281,10 +283,16 @@ export function ChatPage() {
           quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
-        <EmptyState agent={c.activeAgent} />
+        <EmptyState
+          agent={c.activeAgent}
+          hasSessions={c.sessions.length > 0}
+          onPickPrompt={c.prefillStarterPrompt}
+        />
       )}
 
-      {c.noAgent ? (
+      {c.isAgentAccessRevoked ? (
+        <AgentAccessRevokedBanner agentName={c.activeAgent?.name} />
+      ) : c.noAgent ? (
         <NoAgentBanner />
       ) : c.isAgentArchived ? (
         <ArchivedAgentBanner agentName={c.activeAgent?.name} />
@@ -301,6 +309,7 @@ export function ChatPage() {
         tasks={queuedTasks}
         headStatus={c.pendingTask?.status}
         onSendNow={c.handleSendQueuedTaskNow}
+        sendNowDisabled={c.isAgentAccessRevoked}
         onEdit={c.handleEditQueuedTask}
         onRemove={c.handleRemoveQueuedTask}
         onClear={c.handleClearQueuedTasks}
@@ -309,16 +318,22 @@ export function ChatPage() {
       <ChatInput
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
+        starterPromptRequest={c.starterPromptRequest}
+        onStarterPromptApplied={c.handleStarterPromptApplied}
         onRestoreDraftApplied={c.handleRestoreDraftApplied}
-        uploadEnabled={c.uploadEnabled}
+        uploadEnabled={c.uploadEnabled && !c.isAgentAccessRevoked}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
         allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
         disabled={
-          c.isSessionArchived || c.isAgentArchived || !c.isAgentRuntimeBound
+          c.isSessionArchived ||
+          c.isAgentArchived ||
+          c.isAgentAccessRevoked ||
+          !c.isAgentRuntimeBound
         }
         noAgent={c.noAgent}
         agentArchived={c.isAgentArchived}
+        agentAccessRevoked={c.isAgentAccessRevoked}
         agentRuntimeRequired={!c.isAgentRuntimeBound}
         agentName={c.activeAgent?.name}
         projects={c.projects}

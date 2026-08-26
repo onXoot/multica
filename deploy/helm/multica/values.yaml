@@ -48,7 +48,7 @@ images:
 existingSecret: multica-secrets
 
 # -----------------------------------------------------------------------------
-# PostgreSQL (pgvector)
+# PostgreSQL
 # -----------------------------------------------------------------------------
 postgres:
   # Set external.enabled=true to skip the built-in postgres Deployment/PVC and
@@ -98,8 +98,7 @@ backend:
       # ReadWriteOnce, which prevents `backend.replicas > 1` from scheduling a
       # second pod (Multi-Attach error); disabling persistence — or switching
       # accessModes to a ReadWriteMany class — removes that constraint on the
-      # storage side. Note: backend startup migrations are not yet serialized
-      # across pods, so multi-replica still requires care beyond the chart.
+      # storage side.
       enabled: true
       size: 5Gi
       # Leave empty to use the cluster's default StorageClass.
@@ -113,8 +112,16 @@ backend:
         - ReadWriteOnce
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
+    # The migrator and API server retry transient PostgreSQL startup failures
+    # within this budget. Set to 0 to restore fail-fast startup behavior.
+    databaseStartupTimeout: 3m
+    # Fallback bound for each PostgreSQL connection attempt during startup.
+    # Native connect_timeout / PGCONNECT_TIMEOUT / service settings take
+    # precedence so existing deployments keep their pgx connection behavior.
+    databaseConnectTimeout: 5s
     appEnv: production
     appUrl: http://multica.dev.lan
+    codexCapacityRetryCount: 6
     frontendOrigin: http://multica.dev.lan
     corsAllowedOrigins: ""
     cookieDomain: ""
@@ -131,6 +138,10 @@ backend:
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
     # Set false to hide and reject the integration for this deployment.
     vcsIntegrationEnabled: true
+    # Managed multica-cloud connection. Empty keeps self-hosting independent.
+    # Fleet, Billing, entitlement policy and strict seat capacity share it.
+    cloud:
+      url: ""
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     oidcIssuerUrl: ""
@@ -146,6 +157,11 @@ backend:
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
+    # How long a task may sit in the queue unclaimed before failing with
+    # `queued_expired`; raise it when a runtime's low task concurrency lets
+    # tasks legitimately wait behind long-running work.
+    # Accepts a positive duration and empty/unset falls back to the server default of 2h.
+    taskQueuedTTL: 2h
   resources:
     requests:
       cpu: 100m
@@ -163,7 +179,7 @@ backend:
 frontend:
   replicas: 1
   config:
-    # Backend origin used by the frontend runtime proxy for /api, /auth,
+    # Backend origin used by the frontend runtime proxy for /v1, /api, /auth,
     # /uploads, and /ws. Empty defaults to this release's backend Service.
     remoteApiUrl: ""
     # Optional docs origin used by the frontend runtime proxy for /docs.
@@ -218,4 +234,7 @@ monitoring:
     additionalLabels: {}
     samplerQueryErrorsFor: 5m
     samplerQueryLatencyFor: 10m
+    seatCapacityDeadLetteredFor: 5m
+    seatCapacityPendingAgeSeconds: 900
+    seatCapacityPendingFor: 5m
     severity: warning

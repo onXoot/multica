@@ -40,6 +40,7 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 |---|---|---|---|
 | `agentCopyCmd` (`copy <source-agent-id>`) + flag registrar | 21, 47, 54 | Own file with its own `init()` so `cmd_agent.go` line refs stay stable; `registerAgentCopyFlags` is shared with the tests | `multica agent copy --help` |
 | Reads source via `GET /api/agents/<id>` | 95 | Composes over existing endpoints — no dedicated copy API | read `runAgentCopy` |
+| Starter prompts copied without an override flag | `runAgentCopy` starter-prompt body assembly | Copies `starter_prompts` when the source response contains an array; `registerAgentCopyFlags` intentionally exposes no starter-prompt override | `multica agent copy --help` |
 | Same-runtime vs cross-runtime rule | 114, 187 | `sameRuntime` copies `model`/`thinking_level`/`service_tier`; a different `--runtime-id` drops them and requires `--model` (empty allowed) | `multica agent copy --help` |
 | Concurrency copy compatibility | `runAgentCopy`, `copiedAgentMaxConcurrentTasks` | Explicit `--max-concurrent-tasks` is validated before any request; valid source values are copied, while historical values outside 1–50 are omitted so create defaults to 6 | read the concurrency body assembly |
 | Skills copied in the create transaction | 239 | Source skill ids sent as `skill_ids`, bound in the same `POST /api/agents` tx (267); `--no-skills` opts out | read `runAgentCopy` |
@@ -52,6 +53,7 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | `maxAgentDescriptionLength = 255` | 31 | Cap is 255 **Unicode code points** (comment: counted via `utf8.RuneCountInString`, matches Postgres `char_length`) |
 | `AgentResponse` omits plaintext `custom_env` | 33–53 | Exposes only `has_custom_env` (52) and `custom_env_key_count` (53); comment cites MUL-2600 |
 | `CreateAgentRequest` fields | 930–970 | Includes `model`, `thinking_level`, and Codex `service_tier` alongside the profile/runtime/permission inputs |
+| Starter-prompt request and validation | `AgentStarterPrompt`, `normaliseAgentStarterPrompts`, create/update paths | `starter_prompts` is trimmed and validated as at most three complete label/prompt pairs before JSONB persistence; omission defaults to `[]`, update omission preserves, and `[]` clears |
 | `name` required | 623–625 | 400 "name is required" |
 | `description` ≤ 255 code points | 627–629 | `utf8.RuneCountInString(req.Description) > maxAgentDescriptionLength` → 400 |
 | `runtime_id` required | 631–633 | `if req.RuntimeID == ""` → 400 "runtime_id is required" |
@@ -66,11 +68,11 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | `mcp_config` null-skip on create | 704–705 | raw JSON copied through unless the body value is the literal `null` |
 | `mcp_config` redacted on read | 54, 848–851 | `redactMcpConfig` sets `McpConfigRedacted=true`; a private agent read by a member also redacts (494, 509) |
 | Qwen Code managed-MCP injection | `pkg/agent/qwen.go` | Non-null `mcp_config` is written to a daemon-owned 0600 temporary JSON file and passed with `--mcp-config`; the file is removed after the process exits, while `null` preserves native inheritance. |
-| Workspace MCP layer resolved under the agent's | `internal/handler/workspace_mcp.go` `ResolveWorkspaceMcpConfig`; applied in `internal/handler/daemon.go` `buildClaimedTaskResponse` | Union by server name with the agent winning; an agent config declaring zero servers opts out; both containers normalized onto `mcpServers`; read on every claim, so an admin edit lands on the agent's next task |
-| Workspace MCP read/write API | `internal/handler/workspace_mcp_api.go` | `GET /api/workspaces/{id}/mcp-config` returns the non-secret inventory (name / transport / enabled) and never the document, for any role; `PUT /mcp-config` (full replace, `null` clears) and `PUT`/`DELETE /mcp-config/servers/{name}` (per-server, row-locked read-modify-write) are owner/admin and refuse agent actors |
+| Assigned workspace MCP servers folded into the agent's | `internal/handler/workspace_mcp.go` `ResolveAgentMcpConfig`; applied in `internal/handler/daemon.go` `buildClaimedTaskResponse` | Only servers bound to this agent AND enabled are folded in; union by name with the agent's own winning; both containers normalized onto `mcpServers`; read on every claim, so an assignment or toggle lands on the agent's next task |
+| Workspace MCP library + assignment API | `internal/handler/workspace_mcp_api.go` | `GET /api/workspaces/{id}/mcp-servers` returns name / transport only, never the entry, for any role; `POST`/`PUT`/`DELETE` on the library are owner/admin; `GET`/`POST`/`PUT .../enabled`/`DELETE /api/agents/{id}/mcp-servers` manage one agent's assignments and admit the agent owner or a workspace owner/admin. Every write refuses agent actors. Deleting a library entry sweeps its bindings in the same transaction (no FK) |
 | Effective-set regression guard | `internal/daemon/runtime_mcp_workspace_test.go` | Runs resolve -> `mergeRuntimeAndAgentMcpConfig` for OpenCode; catches a resolver that emits a container the daemon merge would not read |
 | Random emoji avatar default | `agent_avatar.go` 11–32; `agent.go` 1127–1133 | Omitted, empty, or whitespace-only `avatar_url` becomes a cryptographically selected `emoji:<glyph>` sentinel; explicit values are preserved. |
-| `CreateAgent` insert params | `agent.go` create path | Persists avatar_url, runtime_config, instructions, custom_env, custom_args, model, thinking_level, service_tier, mcp_config, visibility, max_concurrent_tasks |
+| `CreateAgent` insert params | `agent.go` create path | Persists avatar_url, runtime_config, instructions, starter_prompts, custom_env, custom_args, model, thinking_level, service_tier, mcp_config, visibility, max_concurrent_tasks |
 | `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
 | `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
 | `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |
@@ -120,6 +122,8 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | Workspace skills FIRST | 1115 | `skills := h.TaskService.LoadAgentSkills(...)` |
 | Built-ins appended | 1116 | `skills = append(skills, h.TaskService.BuiltinSkills()...)` |
 | Runtime payload | `daemon.go` `TaskAgentData` | Carries `Instructions`, `Skills`, `CustomEnv`, `CustomArgs`, `Model`, `ThinkingLevel`, `ServiceTier`, and `McpConfig`; metadata-only fields remain absent |
+| `custom_args` argv and safe launch log | `internal/daemon/daemon.go` `ExecOptions.CustomArgs`; `pkg/agent/launch.go` `Config.logAgentCommand` | Custom args normally reach the provider process argv. Launch logs preserve flag names but redact inline values and positional/value tokens; OS process-list exposure remains, so credentials belong in `custom_env`. |
+| ZeroClaw agent alias pseudo-args | `pkg/agent/zeroclaw.go` `takeZeroclawAgentAlias` / `zeroclawBlockedArgs` | `--agent` and `--agent-alias` (separate or `=value`) are consumed from `custom_args` and sent as `session/new.agentAlias`; neither token reaches argv because `zeroclaw acp` rejects those CLI flags. Omit the selector for sole-agent auto-selection; use it when multiple agents exist without `[acp].default_agent`. |
 
 ## Skill loading — `server/internal/service/task.go`
 
@@ -138,7 +142,7 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 
 | Contract | Line | Behavior |
 |---|---|---|
-| `CreateAgent` INSERT | generated from `queries/agent.sql` | columns include `runtime_config, runtime_id, instructions, custom_env, custom_args, mcp_config, model, thinking_level, service_tier` |
+| `CreateAgent` INSERT | generated from `queries/agent.sql` | columns include `runtime_config, runtime_id, instructions, starter_prompts, custom_env, custom_args, mcp_config, model, thinking_level, service_tier` |
 | `CreateAgentParams` | generated from `queries/agent.sql` | typed params include nullable `Model`, `ThinkingLevel`, and `ServiceTier` |
 | `UpdateAgent` SET | generated from `queries/agent.sql` | COALESCE updates include model/thinking/service tier; dedicated clear queries restore each nullable override |
 | `UpdateAgentCustomEnv` (called by the `UpdateAgentEnv` handler) | 2652 | `SET custom_env = $2` — the only write path for env values |

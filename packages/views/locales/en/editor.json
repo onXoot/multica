@@ -10,6 +10,11 @@
     "task_list": "Task list",
     "quote": "Quote",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Apply link",
+      "remove": "Remove link",
+      "close": "Close link editor"
+    },
     "heading_dropdown": {
       "text": "Text",
       "normal_text": "Normal Text",
@@ -86,7 +91,14 @@
     "copy_code": "Copy code",
     "show_preview": "Show preview",
     "show_source": "Show source",
-    "fullscreen": "Fullscreen"
+    "fullscreen": "Fullscreen",
+    "edit_preview": "Edit live preview",
+    "live_workspace": "Live preview workspace",
+    "editor_label": "HTML editor",
+    "local_draft": "Local draft",
+    "original": "Original",
+    "reset_changes": "Reset changes",
+    "copy_changes": "Copy changes"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"

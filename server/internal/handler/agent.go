@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts
@@ -33,6 +34,17 @@ import (
 // in unicode code points (utf8.RuneCountInString), matching Postgres
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
+
+const (
+	maxAgentStarterPrompts      = 3
+	maxAgentStarterPromptLabel  = 80
+	maxAgentStarterPromptLength = 4000
+)
+
+type AgentStarterPrompt struct {
+	Label  string `json:"label"`
+	Prompt string `json:"prompt"`
+}
 
 type AgentResponse struct {
 	ID          string `json:"id"`
@@ -53,6 +65,9 @@ type AgentResponse struct {
 	// holds only the workspace's own notes — the product half lives in
 	// SystemInstructions and is never stored on the row.
 	Instructions string `json:"instructions"`
+	// StarterPrompts are optional, agent-specific first-turn suggestions. An
+	// empty list tells clients to render their localized fallback prompts.
+	StarterPrompts []AgentStarterPrompt `json:"starter_prompts"`
 	// SystemKey identifies a product-defined agent (e.g. "mika"). Empty for
 	// every user- or template-created agent. The UI keys "this is maintained
 	// by Multica" off this rather than off the display name, which owners may
@@ -166,6 +181,14 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
 
+	starterPrompts := []AgentStarterPrompt{}
+	if len(a.StarterPrompts) > 0 {
+		if err := json.Unmarshal(a.StarterPrompts, &starterPrompts); err != nil {
+			slog.Warn("failed to unmarshal agent starter_prompts", "agent_id", uuidToString(a.ID), "error", err)
+			starterPrompts = []AgentStarterPrompt{}
+		}
+	}
+
 	// composio_toolkit_allowlist: the column is stored as TEXT[] and arrives
 	// here as a []string (sqlc). NULL and `{}` both serialize as nil through
 	// the postgres driver — both correctly mean "no toolkits", but the API
@@ -183,6 +206,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
+		StarterPrompts:           starterPrompts,
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
@@ -307,44 +331,88 @@ type ActiveSiblingRunData struct {
 	StartedAt       string `json:"started_at,omitempty"`
 }
 
+// taskIssueStatusCap bounds the custom statuses a claim payload carries. A
+// defensive ceiling, not a product limit: a real catalog holds a handful of
+// entries, and the brief must not grow without bound on a workspace that
+// scripted hundreds. Overflow is reported via IssueStatusesOmitted so the
+// brief can disclose the truncation.
+const taskIssueStatusCap = 30
+
+// TaskIssueStatusData is one active CUSTOM workspace status on the claim wire
+// (MUL-6460). Only the fields an agent needs to choose and write the status
+// travel: key is the CLI argument, name is what users call it in instructions,
+// category anchors the inherited platform behavior, and description is the
+// admin's "when to use me" guidance — the disambiguator when a category holds
+// more than one status. Color/position/id stay off the wire: they carry no
+// behavioral meaning for an agent, and the server already emits entries in
+// catalog order (category rank, then position, then key).
+type TaskIssueStatusData struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Description string `json:"description,omitempty"`
+}
+
 type AgentTaskResponse struct {
-	ID                      string                               `json:"id"`
-	AgentID                 string                               `json:"agent_id"`
-	RuntimeID               string                               `json:"runtime_id"`
-	IssueID                 string                               `json:"issue_id"`
-	WorkspaceID             string                               `json:"workspace_id"`
-	PluginExecutionManifest *service.PluginExecutionManifestData `json:"plugin_execution_manifest,omitempty"`
+	ID                   string                 `json:"id"`
+	AgentID              string                 `json:"agent_id"`
+	RuntimeID            string                 `json:"runtime_id"`
+	IssueID              string                 `json:"issue_id"`
+	WorkspaceID          string                 `json:"workspace_id"`
+	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
+	// daemon renders as MCP tools for this task. Resolved at claim time so
+	// disabling or uninstalling a plugin takes effect on the next task rather
+	// than whenever a daemon happens to restart.
+	PluginHookTools []service.PluginHookTool `json:"plugin_hook_tools,omitempty"`
+	// RemoteMCPDaemonToken is a short-lived, workspace-and-daemon scoped
+	// credential used only by the local daemon's write-only Remote MCP broker.
+	// It is never injected into the agent process.
+	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
-	WorkspaceContext   string                 `json:"workspace_context,omitempty"`
-	ActiveSiblingRuns  []ActiveSiblingRunData `json:"active_sibling_runs,omitempty"`
-	ThreadName         string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Status             string                 `json:"status"`
-	Priority           int32                  `json:"priority"`
-	DispatchedAt       *string                `json:"dispatched_at"`
-	StartedAt          *string                `json:"started_at"`
-	CompletedAt        *string                `json:"completed_at"`
-	Result             any                    `json:"result"`
-	Error              *string                `json:"error"`
-	FailureReason      string                 `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt            int32                  `json:"attempt"`
-	MaxAttempts        int32                  `json:"max_attempts"`
-	ParentTaskID       *string                `json:"parent_task_id,omitempty"`
-	IsLeaderTask       bool                   `json:"is_leader_task,omitempty"`
-	LeaderRoleResolved bool                   `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
-	Agent              *TaskAgentData         `json:"agent,omitempty"`
-	ConnectedApps      []ConnectedAppData     `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
-	Repos              []RepoData             `json:"repos,omitempty"`
-	ProjectID          string                 `json:"project_id,omitempty"`          // issue's project, when present
-	ProjectTitle       string                 `json:"project_title,omitempty"`       // for surfacing in agent context
-	ProjectDescription string                 `json:"project_description,omitempty"` // durable project-level context injected into the brief
-	ProjectResources   []ProjectResourceData  `json:"project_resources,omitempty"`   // resources attached to the project
-	CreatedAt          string                 `json:"created_at"`
-	PriorSessionID     string                 `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir       string                 `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	WorkspaceContext string `json:"workspace_context,omitempty"`
+	// IssueStatuses is the workspace's ACTIVE CUSTOM status catalog (MUL-6460),
+	// injected into the agent brief so agents can see and use statuses beyond
+	// the seven built-ins. Built-ins are omitted: their keys, names, and
+	// semantics are locked (is_system rows cannot be renamed or archived), so
+	// the daemon already knows them. Empty for a workspace with no custom
+	// statuses — the daemon then renders the brief exactly as before, keeping
+	// existing deployments byte-identical. Capped at taskIssueStatusCap
+	// entries; IssueStatusesOmitted carries the overflow count.
+	IssueStatuses []TaskIssueStatusData `json:"issue_statuses,omitempty"`
+	// IssueStatusesOmitted is how many active custom statuses were dropped by
+	// the cap, so the brief can say the list is incomplete instead of
+	// presenting a truncated catalog as the whole one.
+	IssueStatusesOmitted int                    `json:"issue_statuses_omitted,omitempty"`
+	ActiveSiblingRuns    []ActiveSiblingRunData `json:"active_sibling_runs,omitempty"`
+	ThreadName           string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Status               string                 `json:"status"`
+	Priority             int32                  `json:"priority"`
+	DispatchedAt         *string                `json:"dispatched_at"`
+	StartedAt            *string                `json:"started_at"`
+	CompletedAt          *string                `json:"completed_at"`
+	Result               any                    `json:"result"`
+	Error                *string                `json:"error"`
+	FailureReason        string                 `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt              int32                  `json:"attempt"`
+	MaxAttempts          int32                  `json:"max_attempts"`
+	ParentTaskID         *string                `json:"parent_task_id,omitempty"`
+	IsLeaderTask         bool                   `json:"is_leader_task,omitempty"`
+	LeaderRoleResolved   bool                   `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
+	Agent                *TaskAgentData         `json:"agent,omitempty"`
+	ConnectedApps        []ConnectedAppData     `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
+	Repos                []RepoData             `json:"repos,omitempty"`
+	ProjectID            string                 `json:"project_id,omitempty"`          // issue's project, when present
+	ProjectTitle         string                 `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription   string                 `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources     []ProjectResourceData  `json:"project_resources,omitempty"`   // resources attached to the project
+	CreatedAt            string                 `json:"created_at"`
+	PriorSessionID       string                 `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir         string                 `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback. The daemon surfaces the continuity gap in
@@ -363,6 +431,13 @@ type AgentTaskResponse struct {
 	// relativeWorkDir() for the full rules. Older clients can still read
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
 	RelativeWorkDir string `json:"relative_work_dir,omitempty"`
+	// DurableWorkDir is the daemon-confirmed directory that remains usable
+	// after a disposable task worktree has been finalized and removed. It is a
+	// point-in-time task snapshot and does not follow later resource edits.
+	DurableWorkDir string `json:"durable_work_dir,omitempty"`
+	// RelativeDurableWorkDir is the privacy-safe display form. The absolute
+	// value is retained for explicit clipboard actions only.
+	RelativeDurableWorkDir string `json:"relative_durable_work_dir,omitempty"`
 	// BranchName is the git branch this run delivered its work on, set only by
 	// worktree-mode local_directory tasks. Unlike WorkDir it is safe to show
 	// verbatim: it is a ref inside the user's own repo, not a filesystem path.
@@ -398,6 +473,7 @@ type AgentTaskResponse struct {
 	QuickCreatePriority      string                 `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
 	QuickCreateDueDate       string                 `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs []string               `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
+	QuickCreateSourceContext json.RawMessage        `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
 	HandoffNote              string                 `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
 	SquadID                  string                 `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName                string                 `json:"squad_name,omitempty"`                  // display name for the picker squad
@@ -686,6 +762,10 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.WorkDir.Valid {
 		workDir = t.WorkDir.String
 	}
+	durableWorkDir := ""
+	if t.DurableWorkDir.Valid {
+		durableWorkDir = t.DurableWorkDir.String
+	}
 	handoffNote := ""
 	if t.HandoffNote.Valid {
 		handoffNote = t.HandoffNote.String
@@ -695,32 +775,34 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		branchName = t.BranchName.String
 	}
 	return AgentTaskResponse{
-		ID:                  uuidToString(t.ID),
-		AgentID:             uuidToString(t.AgentID),
-		RuntimeID:           uuidToString(t.RuntimeID),
-		IssueID:             uuidToString(t.IssueID),
-		WorkspaceID:         workspaceID,
-		Status:              t.Status,
-		Priority:            t.Priority,
-		DispatchedAt:        timestampToPtr(t.DispatchedAt),
-		StartedAt:           timestampToPtr(t.StartedAt),
-		CompletedAt:         timestampToPtr(t.CompletedAt),
-		Result:              result,
-		Error:               textToPtr(t.Error),
-		FailureReason:       failureReason,
-		BranchName:          branchName,
-		Attempt:             t.Attempt,
-		MaxAttempts:         t.MaxAttempts,
-		ParentTaskID:        uuidToPtr(t.ParentTaskID),
-		IsLeaderTask:        t.IsLeaderTask,
-		CreatedAt:           timestampToString(t.CreatedAt),
-		TriggerCommentID:    uuidToPtr(t.TriggerCommentID),
-		CoalescedCommentIDs: uuidsToStrings(t.CoalescedCommentIds),
-		DeliveredCommentIDs: uuidStringsOrEmpty(t.DeliveredCommentIds),
-		TriggerSummary:      textToPtr(t.TriggerSummary),
-		HandoffNote:         handoffNote,
-		WorkDir:             workDir,
-		RelativeWorkDir:     relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
+		ID:                     uuidToString(t.ID),
+		AgentID:                uuidToString(t.AgentID),
+		RuntimeID:              uuidToString(t.RuntimeID),
+		IssueID:                uuidToString(t.IssueID),
+		WorkspaceID:            workspaceID,
+		Status:                 t.Status,
+		Priority:               t.Priority,
+		DispatchedAt:           timestampToPtr(t.DispatchedAt),
+		StartedAt:              timestampToPtr(t.StartedAt),
+		CompletedAt:            timestampToPtr(t.CompletedAt),
+		Result:                 result,
+		Error:                  textToPtr(t.Error),
+		FailureReason:          failureReason,
+		BranchName:             branchName,
+		Attempt:                t.Attempt,
+		MaxAttempts:            t.MaxAttempts,
+		ParentTaskID:           uuidToPtr(t.ParentTaskID),
+		IsLeaderTask:           t.IsLeaderTask,
+		CreatedAt:              timestampToString(t.CreatedAt),
+		TriggerCommentID:       uuidToPtr(t.TriggerCommentID),
+		CoalescedCommentIDs:    uuidsToStrings(t.CoalescedCommentIds),
+		DeliveredCommentIDs:    uuidStringsOrEmpty(t.DeliveredCommentIds),
+		TriggerSummary:         textToPtr(t.TriggerSummary),
+		HandoffNote:            handoffNote,
+		WorkDir:                workDir,
+		RelativeWorkDir:        relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
+		DurableWorkDir:         durableWorkDir,
+		RelativeDurableWorkDir: relativeWorkDir(durableWorkDir, "", ""),
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
@@ -752,8 +834,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 //
 // Returns empty when work_dir is empty, or when stripping leaves nothing
 // (i.e. work_dir was exactly the user's home — rendering nothing is
-// preferable to a chip that says `<name>`). shortTaskID() must stay in
-// lock-step with server/internal/daemon/execenv/git.go:shortID — both
+// preferable to a chip that says `<name>`). taskDirSegment() must stay in
+// lock-step with server/internal/daemon/execenv/git.go:taskKey — both
 // consume the same task UUID; if that helper changes, this one must too
 // or the envRoot match silently degrades to the local_directory fallback.
 func relativeWorkDir(workDir, workspaceID, taskID string) string {
@@ -765,7 +847,7 @@ func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	normalized := strings.ReplaceAll(workDir, "\\", "/")
 
 	if workspaceID != "" && taskID != "" {
-		envRootSuffix := workspaceID + "/" + shortTaskID(taskID)
+		envRootSuffix := workspaceID + "/" + taskDirSegment(taskID)
 		if idx := strings.Index(normalized, envRootSuffix); idx >= 0 {
 			return normalized[idx:]
 		}
@@ -778,14 +860,21 @@ func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	return basename(normalized)
 }
 
-// shortTaskID mirrors execenv.shortID — first 8 hex chars of the UUID
-// with dashes stripped. Kept inline here so the agent handler has zero
-// imports from the daemon package (which would create an unwanted cycle
-// between handler and daemon).
-func shortTaskID(uuid string) string {
+// taskDirSegmentLen and taskDirSegment mirror execenv.taskKeyLen /
+// execenv.taskKey — the LAST 12 hex chars of the task id. Kept inline here so
+// the agent handler has zero imports from the daemon package (which would
+// create an unwanted cycle between handler and daemon).
+//
+// It must keep taking the TAIL. A UUIDv7's leading hex chars are timestamp
+// bits shared by every task created within ~65.5s (#7326); the daemon stopped
+// reading from that end, and this reconstruction only matches while both sides
+// agree.
+const taskDirSegmentLen = 12
+
+func taskDirSegment(uuid string) string {
 	s := strings.ReplaceAll(uuid, "-", "")
-	if len(s) > 8 {
-		return s[:8]
+	if len(s) > taskDirSegmentLen {
+		return s[len(s)-taskDirSegmentLen:]
 	}
 	return s
 }
@@ -1015,16 +1104,17 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name          string            `json:"name"`
-	Description   string            `json:"description"`
-	Instructions  string            `json:"instructions"`
-	AvatarURL     *string           `json:"avatar_url"`
-	RuntimeID     string            `json:"runtime_id"`
-	RuntimeConfig any               `json:"runtime_config"`
-	CustomEnv     map[string]string `json:"custom_env"`
-	CustomArgs    []string          `json:"custom_args"`
-	McpConfig     json.RawMessage   `json:"mcp_config"`
-	Visibility    string            `json:"visibility"`
+	Name           string               `json:"name"`
+	Description    string               `json:"description"`
+	Instructions   string               `json:"instructions"`
+	StarterPrompts []AgentStarterPrompt `json:"starter_prompts"`
+	AvatarURL      *string              `json:"avatar_url"`
+	RuntimeID      string               `json:"runtime_id"`
+	RuntimeConfig  any                  `json:"runtime_config"`
+	CustomEnv      map[string]string    `json:"custom_env"`
+	CustomArgs     []string             `json:"custom_args"`
+	McpConfig      json.RawMessage      `json:"mcp_config"`
+	Visibility     string               `json:"visibility"`
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
@@ -1073,6 +1163,32 @@ func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMe
 	return raw, nil
 }
 
+func normaliseAgentStarterPrompts(prompts []AgentStarterPrompt) ([]AgentStarterPrompt, error) {
+	if len(prompts) > maxAgentStarterPrompts {
+		return nil, fmt.Errorf("starter_prompts must contain at most %d items", maxAgentStarterPrompts)
+	}
+
+	normalised := make([]AgentStarterPrompt, 0, len(prompts))
+	for i, item := range prompts {
+		item.Label = strings.TrimSpace(item.Label)
+		item.Prompt = strings.TrimSpace(item.Prompt)
+		if item.Label == "" {
+			return nil, fmt.Errorf("starter_prompts[%d].label is required", i)
+		}
+		if item.Prompt == "" {
+			return nil, fmt.Errorf("starter_prompts[%d].prompt is required", i)
+		}
+		if utf8.RuneCountInString(item.Label) > maxAgentStarterPromptLabel {
+			return nil, fmt.Errorf("starter_prompts[%d].label must be %d characters or fewer", i, maxAgentStarterPromptLabel)
+		}
+		if utf8.RuneCountInString(item.Prompt) > maxAgentStarterPromptLength {
+			return nil, fmt.Errorf("starter_prompts[%d].prompt must be %d characters or fewer", i, maxAgentStarterPromptLength)
+		}
+		normalised = append(normalised, item)
+	}
+	return normalised, nil
+}
+
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
@@ -1098,6 +1214,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RuntimeID == "" {
 		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+	starterPrompts, err := normaliseAgentStarterPrompts(req.StarterPrompts)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Visibility == "" {
@@ -1202,6 +1323,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ca = []byte("[]")
 	}
 
+	sp, _ := json.Marshal(starterPrompts)
+
 	var mc []byte
 	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
 		mc = append([]byte(nil), rawMcpConfig...)
@@ -1264,6 +1387,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
+		StarterPrompts:           sp,
 		ComposioToolkitAllowlist: allowlist,
 	})
 	if err != nil {
@@ -1330,12 +1454,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
-	Name          *string `json:"name"`
-	Description   *string `json:"description"`
-	Instructions  *string `json:"instructions"`
-	AvatarURL     *string `json:"avatar_url"`
-	RuntimeID     *string `json:"runtime_id"`
-	RuntimeConfig any     `json:"runtime_config"`
+	Name           *string               `json:"name"`
+	Description    *string               `json:"description"`
+	Instructions   *string               `json:"instructions"`
+	StarterPrompts *[]AgentStarterPrompt `json:"starter_prompts"`
+	AvatarURL      *string               `json:"avatar_url"`
+	RuntimeID      *string               `json:"runtime_id"`
+	RuntimeConfig  any                   `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
 	// the agent owner or a workspace owner/admin, denies agent actors,
@@ -1599,6 +1724,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Instructions != nil {
 		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
+	}
+	if req.StarterPrompts != nil {
+		starterPrompts, err := normaliseAgentStarterPrompts(*req.StarterPrompts)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		encoded, _ := json.Marshal(starterPrompts)
+		params.StarterPrompts = encoded
 	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)

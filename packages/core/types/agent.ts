@@ -120,6 +120,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "kimi",
   "reasonix",
   "dsh",
+  "dim",
   "kiro",
   "antigravity",
   "qoder",
@@ -128,6 +129,8 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "grok",
   "qwen",
   "qwenpaw",
+  "mcode",
+  "zeroclaw",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -184,6 +187,7 @@ export type TaskFailureReason =
   | "timeout"
   | "codex_semantic_inactivity"
   | "runtime_offline"
+  | "runtime_reconnect_timeout"
   | "runtime_recovery"
   | "manual";
 
@@ -376,6 +380,20 @@ export interface AgentTask {
    */
   relative_work_dir?: string;
   /**
+   * Durable directory that replaces `work_dir` after the daemon confirms a
+   * disposable local worktree was finalized and removed. Terminal tasks may
+   * use this for explicit clipboard actions; its absence means `work_dir`
+   * remains authoritative (including preserved-worktree failures and older
+   * daemon/server combinations). This is a point-in-time delivery snapshot;
+   * later resource renames or detachments do not rewrite historical tasks.
+   */
+  durable_work_dir?: string;
+  /**
+   * Privacy-safe display form of `durable_work_dir`. Never render the absolute
+   * durable path directly; older backends omit both fields.
+   */
+  relative_durable_work_dir?: string;
+  /**
    * Git branch this run delivered its work on. Set only by worktree-mode
    * local_directory tasks, where the agent never touches the user's working
    * copy — the branch is the only pointer to what it produced.
@@ -459,6 +477,8 @@ export interface Agent {
   /** What this agent's owner wrote. For a system agent this holds only the
    *  workspace's own notes — the product half is `system_instructions`. */
   instructions: string;
+  /** Up to three agent-authored first-turn suggestions. Older servers omit it. */
+  starter_prompts?: AgentStarterPrompt[];
   /** Set for product-defined agents (e.g. "mika"). Absent for user- and
    *  template-created agents. Identity for "maintained by Multica" checks —
    *  never the display name, which owners may change. */
@@ -570,6 +590,13 @@ export interface Agent {
   archived_by: string | null;
 }
 
+export interface AgentStarterPrompt {
+  /** Short chip label shown in the empty state. */
+  label: string;
+  /** Full editable text copied into the composer when selected. */
+  prompt: string;
+}
+
 export interface DisabledRuntimeSkill {
   runtime_id: string;
   provider: string;
@@ -607,6 +634,7 @@ export interface CreateAgentRequest {
   name: string;
   description?: string;
   instructions?: string;
+  starter_prompts?: AgentStarterPrompt[];
   avatar_url?: string;
   runtime_id: string;
   runtime_config?: Record<string, unknown>;
@@ -659,6 +687,7 @@ export interface StoredAgentDraft {
   name: string;
   description: string;
   instructions: string;
+  starter_prompts: AgentStarterPrompt[];
   avatar_url: string | null;
   model: string;
   thinking_level: string;
@@ -701,6 +730,7 @@ export interface UpdateAgentRequest {
   name?: string;
   description?: string;
   instructions?: string;
+  starter_prompts?: AgentStarterPrompt[];
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;

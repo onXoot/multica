@@ -39,39 +39,6 @@ WHERE slug = $1;
 SELECT attribution_fail_closed FROM workspace
 WHERE id = $1;
 
--- name: GetWorkspaceMcpConfig :one
--- Lean read of the workspace's shared MCP document for the daemon claim path,
--- which resolves it under every agent's own mcp_config on each claim. Kept
--- narrow (like GetWorkspaceAttributionFailClosed) so the hot path never drags
--- settings/repos/context along. NULL = nothing shared at this layer.
-SELECT mcp_config FROM workspace
-WHERE id = $1;
-
--- name: LockWorkspaceMcpConfig :one
--- Read-for-update half of the per-server edit path. The shared document is
--- never echoed back to clients, so a UI cannot do the read-modify-write
--- itself; the server does it instead, and this lock is what keeps two admins
--- editing different servers from losing one another's write. Takes only the
--- workspace row, so it cannot deadlock against the workspace -> chat_session
--- -> agent_task_queue lock order used elsewhere.
-SELECT mcp_config FROM workspace
-WHERE id = $1
-FOR UPDATE;
-
--- name: SetWorkspaceMcpConfig :one
--- Writes the shared MCP document. Mirrors the agent column's two-query
--- pattern: COALESCE cannot restore NULL, so clearing has its own query below.
-UPDATE workspace SET mcp_config = $2, updated_at = now()
-WHERE id = $1
-RETURNING *;
-
--- name: ClearWorkspaceMcpConfig :one
--- Restores the "nothing shared at this layer" state. Every agent that was
--- inheriting falls back to its own mcp_config on its next claim.
-UPDATE workspace SET mcp_config = NULL, updated_at = now()
-WHERE id = $1
-RETURNING *;
-
 -- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
@@ -132,6 +99,9 @@ SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE;
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
 ),
+ws_sessions AS (
+    SELECT id FROM chat_session WHERE workspace_id = $1
+),
 ws_agents AS (
     SELECT id FROM agent WHERE workspace_id = $1
 ),
@@ -144,12 +114,20 @@ cleared_agent_label_assignments AS (
 cleared_skill_label_assignments AS (
     DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
 ),
+cleared_channel_task_deliveries AS (
+    DELETE FROM channel_task_delivery WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_channel_outbound_messages AS (
+    DELETE FROM channel_outbound_message WHERE installation_id IN (SELECT id FROM ws_installations)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
 ),
-cleared_dingtalk_group_routes AS (
-    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
+cleared_chat_contexts AS (
+    DELETE FROM channel_chat_context_generation
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+       OR chat_session_id IN (SELECT id FROM ws_sessions)
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
@@ -174,6 +152,15 @@ cleared_draft_restores AS (
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
 ),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
+),
 cleared_audit AS (
     -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no
     -- workspace_id and no reaper, so a detached (NULL) row would be permanently
@@ -194,6 +181,20 @@ cleared_issue_properties AS (
 ),
 cleared_quick_actions AS (
     DELETE FROM quick_action WHERE workspace_id = $1
+),
+ws_mcp_servers AS (
+    SELECT id FROM workspace_mcp_server WHERE workspace_id = $1
+),
+cleared_agent_mcp_bindings AS (
+    -- agent_mcp_server carries no FK in either direction, so sweep it from
+    -- both sides: the workspace's own servers, and any binding held by an
+    -- agent that is about to be removed with the workspace.
+    DELETE FROM agent_mcp_server
+    WHERE server_id IN (SELECT id FROM ws_mcp_servers)
+       OR agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_workspace_mcp_servers AS (
+    DELETE FROM workspace_mcp_server WHERE workspace_id = $1
 ),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1

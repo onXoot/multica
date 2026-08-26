@@ -20,24 +20,24 @@ export interface Workspace {
 }
 
 /**
- * One MCP server shared by the workspace, as returned by
- * `GET /api/workspaces/{id}/mcp-config`.
+ * One MCP server in the workspace's library.
  *
  * This is the WHOLE read shape: the stored configuration is write-only, so
  * urls, commands, headers, and env never leave the server for any role. UI
  * that needs to change an entry sends a replacement rather than editing what
  * it read back.
+ *
+ * `enabled` is only present on an AGENT's assignment list, where it is the
+ * per-agent toggle; the workspace library listing has no binding to report.
  */
 export interface WorkspaceMcpServer {
+  id: string;
+  workspace_id: string;
   name: string;
   transport: string;
-  enabled: boolean;
-}
-
-export interface WorkspaceMcpConfig {
-  workspace_id: string;
-  servers: WorkspaceMcpServer[];
-  server_count: number;
+  enabled?: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Member {
@@ -109,4 +109,26 @@ export interface Invitation {
   inviter_name?: string;
   inviter_email?: string;
   workspace_name?: string;
+}
+
+export interface ShareLink {
+  id: string;
+  workspace_id: string;
+  code: string;
+  created_by: string;
+  role: MemberRole;
+  expires_at: string | null;
+  max_uses: number | null;
+  use_count: number;
+  is_active: boolean;
+  created_at: string;
+  creator_name?: string;
+  creator_email?: string;
+}
+
+export interface ShareLinkInfo {
+  workspace_name: string;
+  workspace_slug: string;
+  creator_name?: string;
+  role: MemberRole;
 }

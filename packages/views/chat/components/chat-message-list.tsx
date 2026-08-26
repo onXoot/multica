@@ -185,7 +185,6 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
-  const [isNearBottom, setIsNearBottom] = useState(true);
   const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
     scrollRef.current = node;
     setScrollContainerEl(node);
@@ -329,8 +328,13 @@ export function ChatMessageList({
         initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={120}
-        atBottomStateChange={setIsNearBottom}
-        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
+        // Follow rapid streamed output only while Virtuoso says the reader is
+        // at the live end. An in-flight smooth animation temporarily reports
+        // "not at bottom" on the next append and permanently drops the follow
+        // (#6697), so live growth must use an immediate scroll.
+        followOutput={(atBottom) =>
+          !isFetchingOlderMessages && atBottom ? "auto" : false
+        }
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();
@@ -947,6 +951,7 @@ function FailureBubble({
     manual: t(($) => $.message_list.failure.manual),
     cancelled: t(($) => $.message_list.failure.manual),
     skill_bundle_unavailable: t(($) => $.message_list.failure.skill_bundle_unavailable),
+    runtime_cli_timeout: t(($) => $.message_list.failure.runtime_cli_timeout),
     "agent_error.provider_network": t(($) => $.message_list.failure.provider_network),
     "agent_error.provider_auth_or_access": t(($) => $.message_list.failure.provider_auth_or_access),
     "agent_error.provider_quota_limit": t(($) => $.message_list.failure.provider_quota_limit),
