@@ -78,7 +78,7 @@ func loadOIDCRuntimeConfig() (oidcRuntimeConfig, error) {
 		ProviderName:         strings.TrimSpace(os.Getenv("OIDC_PROVIDER_NAME")),
 		AllowedGroups:        splitCommaSeparated(os.Getenv("OIDC_ALLOWED_GROUPS")),
 		GroupsClaim:          strings.TrimSpace(os.Getenv("OIDC_GROUPS_CLAIM")),
-		RequireVerifiedEmail: os.Getenv("OIDC_REQUIRE_VERIFIED_EMAIL") != "false",
+		RequireVerifiedEmail: !strings.EqualFold(strings.TrimSpace(os.Getenv("OIDC_REQUIRE_VERIFIED_EMAIL")), "false"),
 	}
 	if cfg.IssuerURL == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURI == "" {
 		return oidcRuntimeConfig{}, errors.New("OIDC is not configured")
@@ -153,14 +153,16 @@ func oidcGroupAllowed(userGroups, allowedGroups []string) bool {
 	return false
 }
 
+// validOIDCURL reports whether a configured OIDC URL (issuer or redirect) is
+// acceptable. Upstream requires HTTPS or a loopback HTTP URL. This fork
+// additionally accepts plain-HTTP public URLs so a personal deployment can
+// run OIDC against a bare IP without TLS. Deliberate weakening: with a plain
+// HTTP redirect URI the authorization code and ID token travel in cleartext.
 func validOIDCURL(value *url.URL) bool {
 	if value == nil || value.Host == "" {
 		return false
 	}
-	if value.Scheme == "https" {
-		return true
-	}
-	return value.Scheme == "http" && (value.Hostname() == "localhost" || value.Hostname() == "127.0.0.1" || value.Hostname() == "::1")
+	return value.Scheme == "https" || value.Scheme == "http"
 }
 
 func discoverOIDCProvider(ctx context.Context, issuer string) (*oidc.Provider, error) {

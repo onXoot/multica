@@ -104,7 +104,7 @@ SMTP takes priority over Resend whenever `SMTP_HOST` is non-empty.
 |---|---|---|
 | `GOOGLE_CLIENT_ID` | empty | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | empty | Google OAuth client secret |
-| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Must exactly match the callback URL in the Google Console |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/login/callback` | Must exactly match the callback URL in the Google Console |
 
 **Takes effect at runtime**: the frontend reads these settings via `/api/config` at runtime, so **changing them requires no frontend rebuild or redeploy** — restart the server and they apply.
 
@@ -119,7 +119,7 @@ Configure one discovery-capable OIDC provider, such as Authentik or GitLab. Leav
 | `OIDC_ISSUER_URL` | empty | Exact issuer URL advertised by the provider's discovery document |
 | `OIDC_CLIENT_ID` | empty | OIDC client ID |
 | `OIDC_CLIENT_SECRET` | empty | OIDC client secret |
-| `OIDC_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Registered frontend callback URL |
+| `OIDC_REDIRECT_URI` | `http://localhost:3000/login/callback` | Registered frontend callback URL |
 | `OIDC_PROVIDER_NAME` | `OpenID Connect` | Login button label, for example `Authentik` or `GitLab` |
 | `OIDC_SCOPES` | `openid profile email` | Space-separated scopes; `openid` is always added |
 | `OIDC_ALLOWED_GROUPS` | empty | Optional comma-separated group allowlist; access requires one exact match |

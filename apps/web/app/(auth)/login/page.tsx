@@ -257,7 +257,7 @@ function LoginPageContent() {
         googleClientId
           ? {
               clientId: googleClientId,
-              redirectUri: `${window.location.origin}/auth/callback`,
+              redirectUri: `${window.location.origin}/login/callback`,
               state: authAppState,
             }
           : undefined

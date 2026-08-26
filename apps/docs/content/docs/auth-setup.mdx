@@ -82,7 +82,7 @@ Do not enable a fixed code on a publicly reachable instance. The production comb
 2. Add the Multica frontend's callback URL to **Authorized redirect URIs**:
 
    ```text
-   https://multica.example.com/auth/callback
+   https://multica.example.com/login/callback
    ```
 
 3. Set:
@@ -90,7 +90,7 @@ Do not enable a fixed code on a publicly reachable instance. The production comb
    ```dotenv
    GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+   GOOGLE_REDIRECT_URI=https://multica.example.com/login/callback
    ```
 
 4. Restart the API service.
@@ -104,7 +104,7 @@ Multica can use one discovery-capable OIDC provider alongside email codes and Go
 1. Register a confidential web application in the provider with this callback URL:
 
     ```text
-    https://multica.yourdomain.com/auth/callback
+    https://multica.yourdomain.com/login/callback
     ```
 
 2. Configure Multica:
@@ -113,7 +113,7 @@ Multica can use one discovery-capable OIDC provider alongside email codes and Go
     OIDC_ISSUER_URL=https://auth.yourdomain.com/application/o/multica
     OIDC_CLIENT_ID=multica
     OIDC_CLIENT_SECRET=replace-me
-    OIDC_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
+    OIDC_REDIRECT_URI=https://multica.yourdomain.com/login/callback
     OIDC_PROVIDER_NAME=Company SSO
     # Optional group restriction:
     OIDC_ALLOWED_GROUPS=multica-users,multica-admins
@@ -126,7 +126,7 @@ Multica can use one discovery-capable OIDC provider alongside email codes and Go
 
 By default Multica requires `email_verified=true` before it creates an account. On first login, the account is linked to the provider's stable `(issuer, subject)` identity, so later email changes do not create a second account. Set `OIDC_REQUIRE_VERIFIED_EMAIL=false` only when the provider cannot emit this claim and its email ownership policy is trusted. `OIDC_ALLOWED_GROUPS` optionally requires an exact match in `OIDC_GROUPS_CLAIM`. OIDC configuration is read at runtime, so the frontend does not need to be rebuilt.
 
-The iOS app opens this same web login in the system authentication browser and returns through the registered `multica://auth/callback` scheme. Its `EXPO_PUBLIC_WEB_URL` must point to the frontend paired with the configured API.
+The iOS app opens this same web login in the system authentication browser and returns through the registered `multica://login/callback` scheme. Its `EXPO_PUBLIC_WEB_URL` must point to the frontend paired with the configured API.
 
 ## Signup restrictions
 

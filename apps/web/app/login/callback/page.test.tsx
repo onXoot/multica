@@ -301,7 +301,7 @@ describe("CallbackPage", () => {
       await waitFor(() => {
         expect(mockGoogleLogin).toHaveBeenCalledWith(
           "test-code",
-          expect.stringContaining("/auth/callback"),
+          expect.stringContaining("/login/callback"),
         );
       });
 

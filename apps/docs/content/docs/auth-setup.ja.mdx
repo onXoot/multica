@@ -82,7 +82,7 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 2. Multica フロントエンドのコールバックアドレスを **Authorized redirect URIs** に追加します:
 
    ```text
-   https://multica.example.com/auth/callback
+   https://multica.example.com/login/callback
    ```
 
 3. 次を設定します:
@@ -90,7 +90,7 @@ MULTICA_DEV_VERIFICATION_CODE=888888
    ```dotenv
    GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+   GOOGLE_REDIRECT_URI=https://multica.example.com/login/callback
    ```
 
 4. API サービスを再起動します。

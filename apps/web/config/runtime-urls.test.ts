@@ -262,9 +262,9 @@ describe("runtimeRewriteDestination", () => {
   });
 
   it("does not rewrite frontend auth callback pages", () => {
-    expect(runtimeRewriteDestination("/auth/callback", {})).toBeUndefined();
+    expect(runtimeRewriteDestination("/login/callback", {})).toBeUndefined();
     expect(
-      runtimeRewriteDestination("/auth/hg-sso/callback", {}),
+      runtimeRewriteDestination("/login/callback/oauth", {}),
     ).toBeUndefined();
   });
 

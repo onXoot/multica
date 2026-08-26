@@ -22,8 +22,8 @@ MULTICA_APP_URL ?= $(FRONTEND_ORIGIN)
 DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 NEXT_PUBLIC_API_URL ?= http://localhost:$(PORT)
 NEXT_PUBLIC_WS_URL ?= ws://localhost:$(PORT)/ws
-GOOGLE_REDIRECT_URI ?= $(FRONTEND_ORIGIN)/auth/callback
-OIDC_REDIRECT_URI ?= $(FRONTEND_ORIGIN)/auth/callback
+GOOGLE_REDIRECT_URI ?= $(FRONTEND_ORIGIN)/login/callback
+OIDC_REDIRECT_URI ?= $(FRONTEND_ORIGIN)/login/callback
 MULTICA_SERVER_URL ?= ws://localhost:$(PORT)/ws
 LOCAL_UPLOAD_BASE_URL ?= http://localhost:$(PORT)
 

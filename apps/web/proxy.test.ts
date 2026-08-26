@@ -250,7 +250,7 @@ describe("proxy runtime upstream rewrites", () => {
     const previous = process.env.REMOTE_API_URL;
     process.env.REMOTE_API_URL = "http://backend:8080";
     try {
-      const res = proxy(makeRequest("/auth/callback"));
+      const res = proxy(makeRequest("/login/callback"));
 
       expect(res.status).toBe(200);
       expect(res.headers.get("x-middleware-rewrite")).toBeNull();

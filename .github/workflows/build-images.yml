@@ -1,0 +1,62 @@
+name: Build and Push GHCR Images
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # GHCR 要求镜像仓库名全小写；表达式不支持大小写转换函数，用 shell 转换后写入环境变量。
+      # github.repository 形如 "onXoot/multica"，转小写后为 "onxoot/multica"。
+      - name: Compute lowercase image refs
+        run: |
+          REPO_LC="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          REF_LC="$(echo '${{ github.ref_name }}' | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_BACKEND=ghcr.io/${REPO_LC}-backend" >> "$GITHUB_ENV"
+          echo "IMAGE_WEB=ghcr.io/${REPO_LC}-web" >> "$GITHUB_ENV"
+          echo "TAG=${REF_LC}" >> "$GITHUB_ENV"
+          echo "VERSION=${REF_LC}" >> "$GITHUB_ENV"
+          echo "DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          # GITHUB_TOKEN 登录 GHCR 时，用户名必须是仓库属主（允许大写）
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 后端镜像（server/Dockerfile -> 根目录 Dockerfile）
+      - name: Build and push backend
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_BACKEND }}:${{ env.TAG }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ env.DATE }}
+
+      # 前端镜像（apps/web/Dockerfile.web -> 根目录 Dockerfile.web）
+      - name: Build and push web
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          tags: ${{ env.IMAGE_WEB }}:${{ env.TAG }}
+          build-args: |
+            NEXT_PUBLIC_APP_VERSION=${{ env.VERSION }}
