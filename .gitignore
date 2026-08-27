@@ -75,6 +75,9 @@ data/
 .idea
 .gstack/
 
+# local release testing
+/release/
+
 # Python (agent tooling)
 __pycache__/
 *.pyc
