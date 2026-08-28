@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "@multica/views/locales/en/common.json";
@@ -22,8 +21,6 @@ function createWrapper() {
 }
 
 const {
-  mockSendCode,
-  mockVerifyCode,
   mockIssueCliToken,
   mockListWorkspaces,
   mockListMyInvitations,
@@ -32,8 +29,6 @@ const {
   searchParamsState,
   authStateRef,
 } = vi.hoisted(() => ({
-  mockSendCode: vi.fn(),
-  mockVerifyCode: vi.fn(),
   mockIssueCliToken: vi.fn(),
   mockListWorkspaces: vi.fn(),
   mockListMyInvitations: vi.fn(),
@@ -67,8 +62,6 @@ vi.mock("@multica/core/auth", async () => {
     await vi.importActual<typeof import("@multica/core/auth")>(
       "@multica/core/auth",
     );
-  authStateRef.state.sendCode = mockSendCode;
-  authStateRef.state.verifyCode = mockVerifyCode;
   const useAuthStore = Object.assign(
     (selector: (s: typeof authStateRef.state) => unknown) =>
       selector(authStateRef.state),
@@ -105,6 +98,10 @@ describe("LoginPage", () => {
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
   });
+
+  // Shared LoginPage behavior is canonical in
+  // packages/views/auth/login-page.test.tsx. This wrapper suite only owns web
+  // platform handoff and redirect behavior.
 
   // Regression: MUL-1080 — if the user is already authenticated on the web
   // and the Desktop app redirects them to /login?platform=desktop, the web
