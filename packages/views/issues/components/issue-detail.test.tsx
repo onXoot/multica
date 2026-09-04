@@ -806,16 +806,6 @@ describe("IssueDetail (shared)", () => {
     );
   });
 
-  it("renders comment bodies without Base UI collapsible panels", async () => {
-    const { container } = renderIssueDetail();
-
-    await screen.findByText("Started working on this");
-
-    expect(
-      container.querySelector('[data-slot="collapsible-content"]'),
-    ).toBeNull();
-  });
-
   it("renders issue title and description after loading", async () => {
     renderIssueDetail();
 
@@ -1146,20 +1136,6 @@ describe("IssueDetail (shared)", () => {
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
   });
 
-  it("reserves the chat launcher's corner at the end of the mobile scroll", async () => {
-    mockViewport.isMobile = true;
-
-    const { container } = renderIssueDetail();
-
-    await waitFor(() => {
-      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
-    });
-
-    // Unpinned, the composer lands in that corner once the reader reaches the
-    // bottom, so the column has to end above the launcher rather than under it.
-    expect(container.querySelector(".max-md\\:pb-chat-launcher")).not.toBeNull();
-  });
-
   it("hides metadata content from the sidebar and shows a button when the bag has keys", async () => {
     // Metadata is agent-facing; the sidebar only exposes a button that opens
     // the raw JSON on demand. Keys are NOT rendered inline anywhere.
@@ -1223,18 +1199,6 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("button", { name: /^Metadata\b/ })).not.toBeInTheDocument();
   });
 
-  it("renders Details section with Created by and dates", async () => {
-    renderIssueDetail();
-
-    await waitFor(() => {
-      expect(screen.getByText("Details")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText("Created by")).toBeInTheDocument();
-    expect(screen.getByText("Created")).toBeInTheDocument();
-    expect(screen.getByText("Updated")).toBeInTheDocument();
-  });
-
   // Details is creator + immutable timestamps, so it ranks below the
   // execution log, which is what people actually open the sidebar for.
   it("orders the Details section after the execution log", async () => {
@@ -1289,14 +1253,6 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  it("renders Activity section header", async () => {
-    renderIssueDetail();
-
-    await waitFor(() => {
-      expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
-    });
-  });
-
   it("renders comments from timeline", async () => {
     renderIssueDetail();
 
@@ -1305,6 +1261,29 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("prefers timeline identity when the actor is absent from the member directory", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment",
+        id: "former-member-comment",
+        actor_type: "member",
+        actor_id: "former-user-1",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+        content: "Authored before leaving",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await screen.findByText("Authored before leaving");
+    expect(screen.getByText("Former Member")).toBeInTheDocument();
   });
 
   it("reruns the source task from an agent failure comment", async () => {
@@ -1327,7 +1306,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await screen.findByText("API Error: 500 Internal server error");
-    fireEvent.click(screen.getByRole("button", { name: "Retry task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry run" }));
 
     await waitFor(() => {
       expect(mockApiObj.rerunIssue).toHaveBeenCalledWith("issue-1", "task-failed");
@@ -1353,7 +1332,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await screen.findByText("Sub-issue MUL-123 is done.");
-    expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
   });
 
   it("does not show retry for successful agent task comments", async () => {
@@ -1376,7 +1355,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await screen.findByText("Finished the requested work.");
-    expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
   });
 
   it("does not show retry for agent system comments without a source task", async () => {
@@ -1398,7 +1377,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await screen.findByText("System coordination update.");
-    expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
   });
 
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {

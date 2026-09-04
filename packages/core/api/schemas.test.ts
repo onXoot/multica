@@ -480,14 +480,14 @@ describe("IssueTriggerPreviewSchema", () => {
   it("parses a well-formed response", () => {
     const parsed = IssueTriggerPreviewSchema.parse({
       triggers: [
-        { issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true },
-        { issue_id: "i2", agent_id: "a2", source: "status", handoff_supported: false },
+        { issue_id: "i1", agent_id: "a1", source: "assign" },
+        { issue_id: "i2", agent_id: "a2", source: "status" },
       ],
       total_count: 2,
     });
     expect(parsed.total_count).toBe(2);
     expect(parsed.triggers).toHaveLength(2);
-    expect(parsed.triggers[0]).toMatchObject({ issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true });
+    expect(parsed.triggers[0]).toMatchObject({ issue_id: "i1", agent_id: "a1", source: "assign" });
   });
 
   it("defaults missing top-level fields (empty / older backend)", () => {
@@ -502,7 +502,6 @@ describe("IssueTriggerPreviewSchema", () => {
       issue_id: "i1",
       agent_id: "",
       source: "",
-      handoff_supported: false,
     });
   });
 
@@ -558,6 +557,26 @@ describe("TimelineEntriesSchema", () => {
     ]);
 
     expect(parsed[0]?.source_task_id).toBe("task-1");
+  });
+
+  it("preserves server-hydrated historical actor identity", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "former-user-1",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "Authored before leaving",
+      },
+    ]);
+
+    expect(parsed[0]?.actor_name).toBe("Former Member");
+    expect(parsed[0]?.actor_avatar_url).toBe(
+      "https://profiles.example.com/former.png",
+    );
   });
 });
 
