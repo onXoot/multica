@@ -257,3 +257,13 @@ Do not claim verification passed unless you ran it. If you skip checks because t
 
 - All queries filter by `workspace_id`; membership gates access; `X-Workspace-ID` selects the workspace.
 - Issue assignees are polymorphic: `assignee_type` plus `assignee_id` can reference a member or an agent.
+
+## Fork: Pending Upstream Fixes
+
+### Duplicate migration number 468 on upstream `main` (open as of 2026-09-14)
+
+Upstream `main` carries two migrations sharing numeric prefix 468 — `468_comment_deleted_at` (from #8323) and `468_drop_reference_only_column` (from #8253). `TestMigrationNumericPrefixesAreUnique` fails on upstream `main` by itself, so this is an upstream bug the fork inherited, not a merge artifact. The v2026.09.14 tag merged it in, which left the fork's `Release` verify job red (the GHCR images still built and published).
+
+- Check after every `origin/main` merge: `(cd server && go test ./internal/migrations/ -run TestMigrationNumericPrefixesAreUnique)`.
+- Once upstream renumbers, merge that fix and the check goes green — nothing else to do.
+- If the fork ever has to fix it first: renumber the **newer** migration (`468_comment_deleted_at` → `469_`) and make its SQL idempotent (`ADD COLUMN IF NOT EXISTS` / `DROP COLUMN IF EXISTS`). The runner tracks applied migrations by filename stem, so a bare rename re-runs `ALTER TABLE comment ADD COLUMN deleted_at` on any instance that already applied it under the old name and aborts. The already-published v2026.09.14 GHCR images make that a real risk.
