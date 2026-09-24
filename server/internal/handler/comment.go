@@ -82,15 +82,11 @@ type CommentResponse struct {
 	// was blocked (no invoke permission, target unavailable, runtime offline) now
 	// reports that here instead of silently dropping the trigger, so the client
 	// can show "comment posted, but N targets were not triggered".
-	TriggerOutcomes []CommentTriggerOutcome        `json:"trigger_outcomes,omitempty"`
-	AgentDeliveries []CommentAgentDeliveryResponse `json:"agent_deliveries,omitempty"`
-}
-
-type CommentAgentDeliveryResponse struct {
-	AgentID     string  `json:"agent_id"`
-	AgentName   string  `json:"agent_name"`
-	Status      string  `json:"status"` // pending | delivered | follow_up
-	DeliveredAt *string `json:"delivered_at,omitempty"`
+	TriggerOutcomes         []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
+	SupplementTaskID        string                  `json:"supplement_task_id,omitempty"`
+	SupplementStatus        string                  `json:"supplement_status,omitempty"`
+	SupplementFailureReason *string                 `json:"supplement_failure_reason,omitempty"`
+	SupplementDeliveredAt   *string                 `json:"supplement_delivered_at,omitempty"`
 }
 
 // CommentTriggerOutcome is the per-target result of an explicit @agent / @squad
@@ -133,6 +129,9 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		Attachments:    attachments,
 	}
 }
+
+// Shared bound for plugin comments and input sent to a running agent.
+const maxCommentContentBytes = 64 * 1024
 
 // summaryContentRunes bounds comment content under summary=true. 200 runes is
 // enough to tell what a comment is about (its opening) while cutting the bulk
@@ -652,13 +651,11 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	}
 	grouped := h.groupReactions(r, commentIDs)
 	groupedAtt := h.groupAttachments(r, commentIDs)
-	deliveries := h.groupCommentAgentDeliveries(r.Context(), commentIDs)
 
 	resp := make([]CommentResponse, len(result.Comments))
 	for i, c := range result.Comments {
 		cid := uuidToString(c.ID)
 		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
-		resp[i].AgentDeliveries = deliveries[cid]
 		// Attach roots_only orientation stats when present (nil map elsewhere).
 		if st, ok := result.RootStats[cid]; ok {
 			rc := st.ReplyCount
@@ -1512,7 +1509,6 @@ type CommentTriggerAgentResponse struct {
 	AvatarURL *string `json:"avatar_url,omitempty"`
 	Source    string  `json:"source"`
 	Reason    string  `json:"reason"`
-	Delivery  string  `json:"delivery"` // current_run | follow_up
 }
 
 type commentAgentTriggerSource string
@@ -1530,16 +1526,19 @@ type commentAgentTrigger struct {
 	Source         commentAgentTriggerSource
 	Squad          *db.Squad
 	AlreadyPending bool
-	// NonLeaderAgentReply marks an agent comment, not authored by the leader,
-	// that the assigned-squad-leader fallback routes to that leader. The author
-	// need not be a squad member. Completion may replay it only if creation
-	// recorded it as a planned input.
+	// NonLeaderAgentReply marks an agent comment routed back to a squad leader
+	// from worker context. The worker need not be a squad member. Completion may
+	// replay it only if creation recorded it as a planned input.
 	NonLeaderAgentReply bool
 }
 
 type commentTriggerComputeOptions struct {
 	ThreadCommentID         pgtype.UUID
 	ExcludeTriggerCommentID pgtype.UUID
+	// AuthoringTaskID is the server-trusted task that wrote an agent comment.
+	// It lets a worker result continue the exact guest squad-leader delegation
+	// without guessing from squad membership or the issue assignee.
+	AuthoringTaskID pgtype.UUID
 	// OriginatorUserID is the top-of-chain human user id for this trigger
 	// (MUL-3963). Only consulted for AGENT actors — canInvokeAgent judges A2A
 	// by the originator, not the immediate agent principal. Members are their
@@ -1564,14 +1563,13 @@ func commentAgentTriggerReason(trigger commentAgentTrigger) string {
 	}
 }
 
-func (h *Handler) commentAgentTriggerToResponse(trigger commentAgentTrigger, delivery string) CommentTriggerAgentResponse {
+func (h *Handler) commentAgentTriggerToResponse(trigger commentAgentTrigger) CommentTriggerAgentResponse {
 	return CommentTriggerAgentResponse{
 		ID:        uuidToString(trigger.Agent.ID),
 		Name:      trigger.Agent.Name,
 		AvatarURL: h.resolveAvatarURLPtr(textToPtr(trigger.Agent.AvatarUrl)),
 		Source:    string(trigger.Source),
 		Reason:    commentAgentTriggerReason(trigger),
-		Delivery:  delivery,
 	}
 }
 
@@ -1651,26 +1649,16 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 	opts.OriginatorUserID = h.invokeOriginatorFromRequest(r, actorType, actorID)
+	if actorType == "agent" {
+		opts.AuthoringTaskID = h.commentSourceTaskID(r)
+	}
 	triggers, targets := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
 	resp := CommentTriggerPreviewResponse{
 		Agents:  make([]CommentTriggerAgentResponse, 0, len(triggers)),
 		Blocked: commentBlockedTargetOutcomes(targets),
 	}
-	steerHeadSHA := pgtype.Text{}
-	if actorType == "member" && editingComment == nil && parentID.Valid {
-		steerHeadSHA = h.TaskService.ResolveIssueReviewSHAParam(r.Context(), issue.ID)
-	}
 	for _, trigger := range triggers {
-		delivery := "follow_up"
-		if actorType == "member" && editingComment == nil && parentID.Valid {
-			count, err := h.Queries.CountSteerableTasksForComment(r.Context(), db.CountSteerableTasksForCommentParams{
-				IssueID: issue.ID, AgentID: trigger.Agent.ID, CommentID: parentID, HeadSha: steerHeadSHA,
-			})
-			if err == nil && count == 1 {
-				delivery = "current_run"
-			}
-		}
-		resp.Agents = append(resp.Agents, h.commentAgentTriggerToResponse(trigger, delivery))
+		resp.Agents = append(resp.Agents, h.commentAgentTriggerToResponse(trigger))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1979,61 +1967,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
 	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
-	resp.AgentDeliveries = h.groupCommentAgentDeliveries(r.Context(), []pgtype.UUID{comment.ID})[uuidToString(comment.ID)]
-	if len(resp.AgentDeliveries) > 0 {
-		h.publish(protocol.EventCommentUpdated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
-			"comment": resp, "issue_revision": created.IssueRevision,
-		})
-	}
 
 	writeJSON(w, http.StatusCreated, resp)
-}
-
-func (h *Handler) groupCommentAgentDeliveries(ctx context.Context, commentIDs []pgtype.UUID) map[string][]CommentAgentDeliveryResponse {
-	grouped := make(map[string][]CommentAgentDeliveryResponse)
-	if len(commentIDs) == 0 {
-		return grouped
-	}
-	rows, err := h.Queries.ListCommentAgentDeliveries(ctx, commentIDs)
-	if err != nil {
-		slog.Warn("list comment agent deliveries failed", "error", err)
-		return grouped
-	}
-	for _, row := range rows {
-		status := row.Status
-		if status == "steering" {
-			status = "pending"
-		}
-		grouped[uuidToString(row.CommentID)] = append(grouped[uuidToString(row.CommentID)], CommentAgentDeliveryResponse{
-			AgentID: uuidToString(row.AgentID), AgentName: row.AgentName, Status: status,
-			DeliveredAt: timestampToPtr(row.DeliveredAt),
-		})
-	}
-	return grouped
-}
-
-func (h *Handler) publishCommentDeliveryUpdate(r *http.Request, commentID pgtype.UUID) {
-	comment, err := h.Queries.GetComment(r.Context(), commentID)
-	if err != nil {
-		return
-	}
-	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
-	if err != nil {
-		return
-	}
-	id := uuidToString(comment.ID)
-	resp := commentToResponse(comment, h.groupReactions(r, []pgtype.UUID{comment.ID})[id], h.groupAttachments(r, []pgtype.UUID{comment.ID})[id])
-	resp.IssueRevision = issue.Revision
-	resp.AgentDeliveries = h.groupCommentAgentDeliveries(r.Context(), []pgtype.UUID{comment.ID})[id]
-	h.publish(protocol.EventCommentUpdated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
-		"comment": resp, "issue_revision": issue.Revision,
-	})
-}
-
-func (h *Handler) publishCommentDeliveryUpdates(r *http.Request, commentIDs []pgtype.UUID) {
-	for _, commentID := range commentIDs {
-		h.publishCommentDeliveryUpdate(r, commentID)
-	}
 }
 
 // clientAuthorableCommentTypes is what POST /comments accepts. `status_change`
@@ -2078,11 +2013,12 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	}
 	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
+		AuthoringTaskID:         comment.SourceTaskID,
 		OriginatorUserID:        originatorUserID,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
-	enqueued := h.enqueueCommentAgentTriggersWithSteer(ctx, issue, comment.ID, triggers, actorType == "member")
+	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	return commentTriggerOutcomes(targets, enqueued)
 }
 
@@ -2150,18 +2086,10 @@ type commentEnqueueResult struct {
 // executing agent) and returns the result keyed by executing agent id
 // (MUL-4525 §2). Outcomes are later fanned from these to every explicit mention
 // target that resolved to the agent, so coalescing a run never drops a named
-// target's outcome. steering / queued / coalesced / deferred are success-shaped
-// (the run was handled, no duplicate task); only a real enqueue failure is blocked.
+// target's outcome. queued / coalesced / deferred are success-shaped (the run
+// was handled, no duplicate task); only a real enqueue failure is blocked.
 func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger) map[string]commentEnqueueResult {
-	return h.enqueueCommentAgentTriggersWithSteer(ctx, issue, triggerCommentID, triggers, false)
-}
-
-func (h *Handler) enqueueCommentAgentTriggersWithSteer(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger, allowSteer bool) map[string]commentEnqueueResult {
 	results := make(map[string]commentEnqueueResult, len(triggers))
-	steerHeadSHA := pgtype.Text{}
-	if allowSteer {
-		steerHeadSHA = h.TaskService.ResolveIssueReviewSHAParam(ctx, issue.ID)
-	}
 	record := func(trigger commentAgentTrigger, status DispatchStatus, reason DispatchReasonCode) {
 		execSquadID := ""
 		if trigger.Squad != nil {
@@ -2170,59 +2098,7 @@ func (h *Handler) enqueueCommentAgentTriggersWithSteer(ctx context.Context, issu
 		results[uuidToString(trigger.Agent.ID)] = commentEnqueueResult{status: status, reason: reason, execSquadID: execSquadID}
 	}
 	for _, trigger := range triggers {
-		if allowSteer {
-			row, err := h.Queries.RegisterCommentSteer(ctx, db.RegisterCommentSteerParams{
-				CommentID: triggerCommentID,
-				AgentID:   trigger.Agent.ID,
-				IssueID:   issue.ID,
-				HeadSha:   steerHeadSHA,
-			})
-			if err == nil && row.Status != "follow_up" {
-				h.requestDaemonPendingWork(uuidToString(row.RuntimeID), protocol.PendingWorkKindTaskSteer)
-				record(trigger, DispatchSteering, ReasonSteering)
-				continue
-			}
-			if errors.Is(err, pgx.ErrNoRows) {
-				// Registration is intentionally idempotent. A create retry or a
-				// comment edit can find the same delivery already pending, claimed,
-				// or delivered. None may fall through to the follow-up enqueue path:
-				// a claimed edit could otherwise inject the old body now and enqueue
-				// the edited body for a second run, while rewriting its receipt.
-				existing, loadErr := h.Queries.GetCommentAgentDelivery(ctx, db.GetCommentAgentDeliveryParams{
-					CommentID: triggerCommentID,
-					AgentID:   trigger.Agent.ID,
-				})
-				if loadErr == nil {
-					switch existing.Status {
-					case "pending":
-						h.requestDaemonPendingWork(uuidToString(existing.RuntimeID), protocol.PendingWorkKindTaskSteer)
-						fallthrough
-					case "steering", "delivered":
-						record(trigger, DispatchSteering, ReasonSteering)
-						continue
-					}
-				} else if !errors.Is(loadErr, pgx.ErrNoRows) {
-					slog.Warn("load existing comment steer failed; falling back to follow-up",
-						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", loadErr)
-				}
-			} else if err != nil {
-				slog.Warn("register comment steer failed; falling back to follow-up",
-					"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
-			}
-		}
 		status, reason := h.resolveCommentTriggerEnqueue(ctx, issue, trigger, triggerCommentID)
-		if allowSteer && status != DispatchBlocked {
-			if err := h.Queries.RecordCommentFollowUpDelivery(ctx, db.RecordCommentFollowUpDeliveryParams{
-				CommentID: triggerCommentID,
-				AgentID:   trigger.Agent.ID,
-				FailureReason: pgtype.Text{
-					String: string(reason), Valid: true,
-				},
-			}); err != nil {
-				slog.Warn("record comment follow-up receipt failed",
-					"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
-			}
-		}
 		record(trigger, status, reason)
 	}
 	return results
@@ -2832,14 +2708,17 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	if actorType != "member" {
 		// Agent-authored comments do not participate in the member-driven
 		// conversation routing (parent-author / thread-root continuation) or
-		// the member assignee fallback. They retain one narrow path restored
-		// after MUL-3794 (MUL-3879): a worker-agent result comment on a
-		// squad-assigned issue can still wake the assigned squad leader, so
-		// the leader→worker→leader coordination loop stays closed. The leader
-		// self-trigger guard lives in
-		// routeAssignedSquadLeaderFallback. Explicit @agent / @squad mentions
-		// are already handled above, so this never double-enqueues a mentioned
-		// target alongside the assigned leader.
+		// the member assignee fallback. Worker-result comments retain the
+		// leader→worker→leader loop: the assigned squad is resolved from the
+		// issue (MUL-3879), while a guest squad is resolved from the exact
+		// covered leader delegation (GH-8301). Explicit @agent / @squad mentions
+		// are already handled above, so neither fallback double-enqueues a
+		// mentioned target.
+		if actorType == "agent" {
+			if triggers, handled := h.routeGuestSquadLeaderFallback(ctx, issue, parentComment, actorID, opts); handled {
+				return triggers, nil
+			}
+		}
 		if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" {
 			if trigger, ok := h.routeAssignedSquadLeaderFallback(ctx, issue, actorType, actorID, opts); ok {
 				trigger.NonLeaderAgentReply = actorType == "agent" && actorID != uuidToString(trigger.Agent.ID)
@@ -2974,8 +2853,51 @@ func (h *Handler) squadLeaderRoleOfAuthoringTask(ctx context.Context, issue db.I
 	return &squad, true
 }
 
-type conversationRoutedAgentInfo struct {
-	SquadID pgtype.UUID
+// routeGuestSquadLeaderFallback closes the leader→worker→leader loop when the
+// squad was @mentioned as a guest instead of assigned to the issue. The
+// authoring worker task must cover the replied-to delegation comment; that
+// comment's own task then proves the exact squad and current leader role. Once
+// that historical leader role is identified, a now-invalid squad or leader
+// fails closed instead of falling through to an unrelated assigned squad.
+func (h *Handler) routeGuestSquadLeaderFallback(ctx context.Context, issue db.Issue, parent *db.Comment, authorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, bool) {
+	if parent == nil || !parent.ID.Valid {
+		return nil, false
+	}
+	// A tombstone preserves only the reply tree, not the guest delegation's
+	// routing authority (#8323). The issue's assignment remains an independent
+	// source of authority for the assigned-squad fallback.
+	if parent.DeletedAt.Valid {
+		return nil, false
+	}
+	if !opts.AuthoringTaskID.Valid {
+		return nil, false
+	}
+	workerTask, err := h.Queries.GetAgentTask(ctx, opts.AuthoringTaskID)
+	if err != nil || workerTask.IsLeaderTask || !workerTask.AgentID.Valid ||
+		uuidToString(workerTask.AgentID) != authorID || !workerTask.IssueID.Valid ||
+		uuidToString(workerTask.IssueID) != uuidToString(issue.ID) || !taskCoversReplyParent(workerTask, parent.ID) {
+		return nil, false
+	}
+	if !parent.SourceTaskID.Valid {
+		return nil, false
+	}
+	leaderTask, err := h.Queries.GetAgentTask(ctx, parent.SourceTaskID)
+	if err != nil || !leaderTask.IsLeaderTask || !leaderTask.SquadID.Valid ||
+		!leaderTask.AgentID.Valid || leaderTask.AgentID != parent.AuthorID {
+		return nil, false
+	}
+	// Preserve the established assigned-squad path when this delegation came
+	// from that same squad. This fallback is only for a distinct guest squad.
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" &&
+		issue.AssigneeID.Valid && issue.AssigneeID == leaderTask.SquadID {
+		return nil, false
+	}
+	trigger, ok := h.routeReplyToParentAuthor(ctx, issue, parent, "agent", authorID, opts)
+	if !ok || trigger.Squad == nil {
+		return nil, true
+	}
+	trigger.NonLeaderAgentReply = true
+	return []commentAgentTrigger{trigger}, true
 }
 
 func (h *Handler) routeThreadRootOwners(ctx context.Context, issue db.Issue, parent *db.Comment, memberID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, bool) {
@@ -3003,38 +2925,22 @@ func (h *Handler) routeConversationOwnersForRoot(ctx context.Context, issue db.I
 		return []commentAgentTrigger{trigger}, true
 	}
 
-	rootID := uuidToString(root.ID)
-	excludedID := uuidToString(opts.ExcludeTriggerCommentID)
-
-	tasks, err := h.Queries.ListTasksByIssue(ctx, issue.ID)
+	if opts.ExcludeTriggerCommentID == root.ID {
+		return nil, false
+	}
+	owners, err := h.Queries.ListConversationRootOwners(ctx, db.ListConversationRootOwnersParams{
+		IssueID: issue.ID, TriggerCommentID: root.ID,
+	})
 	if err != nil {
 		return nil, false
 	}
-	routedAgents := make(map[string]conversationRoutedAgentInfo)
-	for _, task := range tasks {
-		if !task.TriggerCommentID.Valid || !task.AgentID.Valid {
-			continue
-		}
-		if excludedID != "" && uuidToString(task.TriggerCommentID) == excludedID {
-			continue
-		}
-		if uuidToString(task.TriggerCommentID) != rootID {
-			continue
-		}
-		agentID := uuidToString(task.AgentID)
-		info := routedAgents[agentID]
-		if !info.SquadID.Valid {
-			info.SquadID = task.SquadID
-		}
-		routedAgents[agentID] = info
-	}
-	if len(routedAgents) == 0 {
+	if len(owners) == 0 {
 		return nil, false
 	}
 
-	triggers := make([]commentAgentTrigger, 0, len(routedAgents))
-	for agentID, info := range routedAgents {
-		trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, parseUUID(agentID), info.SquadID, memberID, opts)
+	triggers := make([]commentAgentTrigger, 0, len(owners))
+	for _, owner := range owners {
+		trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, owner.AgentID, owner.SquadID, memberID, opts)
 		if ok {
 			triggers = append(triggers, trigger)
 		}
@@ -3447,6 +3353,15 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
+	if _, err := h.Queries.GetTaskSupplementByComment(r.Context(), db.GetTaskSupplementByCommentParams{
+		CommentID: existing.ID, WorkspaceID: wsUUID,
+	}); err == nil {
+		writeError(w, http.StatusConflict, "additional messages cannot be edited")
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to verify additional message")
+		return
+	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -3547,7 +3462,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		// revision writes defer cancellation until the conditional UPDATE wins,
 		// so a race that returns 409 cannot mutate the task queue.
 		if !strictContentEdit {
-			cancelled, err = h.TaskService.CancelTasksByEditedComment(r.Context(), existing.ID)
+			cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
 			if err != nil {
 				slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
 				writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
@@ -3590,9 +3505,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			issueRevision = updated.IssueRevision
 		}
 		if err == nil && oldContent != req.Content && strictContentEdit {
-			cancelled, err = qtx.CancelAgentTasksByEditedComment(r.Context(), existing.ID)
+			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
 			if err == nil {
-				err = service.SettleDeliveredDelegatedFailureRecoveries(r.Context(), qtx, cancelled...)
+				err = service.SettleTerminalTaskState(r.Context(), qtx, cancelled...)
 			}
 		}
 		if err == nil && replaceAttachments {
@@ -3766,7 +3681,9 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		if hasIssue {
 			h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, errTaskSupplementInFlight) {
+			writeError(w, http.StatusConflict, "additional message is still being delivered")
+		} else if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "comment not found")
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed to delete comment")
@@ -3874,6 +3791,8 @@ func (h *Handler) withLiveCommentLock(ctx context.Context, commentID, workspaceI
 // matching the depth bound of the ancestor path queries.
 const commentTombstonePruneDepth = 256
 
+var errTaskSupplementInFlight = errors.New("additional message is still being delivered")
+
 // deleteComment deletes exactly one comment (#8296). A comment that still has
 // replies becomes a tombstone — content, attachments, reactions and resolution
 // cleared, row kept — so each reply stays attached to its direct parent. A
@@ -3896,6 +3815,23 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 	})
 	if err != nil {
 		return out, err
+	}
+	// Keep receipt admission locked through deletion so a concurrent retry
+	// cannot resurrect or deliver the content being removed.
+	receipt, receiptErr := qtx.LockTaskSupplementByComment(ctx, db.LockTaskSupplementByCommentParams{
+		CommentID: commentID, WorkspaceID: workspaceID,
+	})
+	if receiptErr == nil {
+		if receipt.Status == "pending" || receipt.Status == "delivering" {
+			return out, errTaskSupplementInFlight
+		}
+		if err := qtx.DeleteTaskSupplementByComment(ctx, db.DeleteTaskSupplementByCommentParams{
+			CommentID: commentID, WorkspaceID: workspaceID,
+		}); err != nil {
+			return out, err
+		}
+	} else if !errors.Is(receiptErr, pgx.ErrNoRows) {
+		return out, receiptErr
 	}
 	// Separate statement on purpose: its snapshot postdates the locks above,
 	// so it sees every committed reply, and none can be added while they are
@@ -4061,6 +3997,7 @@ func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.
 		}
 		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: comment.ID,
+			AuthoringTaskID:         comment.SourceTaskID,
 			OriginatorUserID:        originatorUserID,
 		})
 		targets := targetsByComment[uuidToString(comment.ID)]

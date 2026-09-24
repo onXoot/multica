@@ -140,6 +140,12 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"535_github_pr_address_index":                               "idx_github_pull_request_pr_owner_repo",
+	"539_task_supplement_request_index":                         "task_supplement_task_request_uidx",
+	"540_task_supplement_capability_index":                      "task_supplement_capability_task_uidx",
+	"541_task_supplement_comment_index":                         "task_supplement_comment_uidx",
+	"546_issue_pr_automation_workspace_index":                   "idx_issue_pr_automation_workspace",
+	"547_issue_pull_request_exclusion_workspace_index":          "idx_issue_pull_request_exclusion_workspace",
 	"510_wakeup_id":                                             "issue_wakeup_id_idx",
 	"511_wakeup_issue":                                          "issue_wakeup_issue_idx",
 	"512_wakeup_due":                                            "issue_wakeup_due_idx",
@@ -154,7 +160,6 @@ var concurrentIndexCleanups = map[string]string{
 	"526_wakeup_terminal_runs":                                  "agent_task_wakeup_terminal_idx",
 	"527_wakeup_receipt_expiry":                                 "issue_wakeup_receipt_expiry_idx",
 	"529_wakeup_pending_event":                                  "issue_wakeup_pending_event_idx",
-	"508_comment_agent_delivery_pending_index":                  "idx_comment_agent_delivery_task_pending",
 	"503_channel_reply_delivery_turn_index":                     "idx_channel_reply_delivery_turn",
 	"504_channel_reply_delivery_installation_index":             "idx_channel_reply_delivery_installation",
 	"505_channel_reply_delivery_binding_index":                  "idx_channel_reply_delivery_binding",
@@ -336,6 +341,7 @@ var concurrentIndexCleanups = map[string]string{
 	"480_instance_telemetry_state_singleton_index":              "instance_telemetry_state_singleton_uidx",
 	"482_agent_task_queue_telemetry_started_index":              "idx_agent_task_queue_telemetry_started",
 	"484_issue_triage_state_index":                              "idx_issue_triage_state",
+	"537_issue_duplicate_of_index":                              "idx_issue_duplicate_of",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

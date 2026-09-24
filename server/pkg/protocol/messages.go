@@ -61,10 +61,16 @@ const (
 	// work, so such a daemon keeps getting a fresh directory and the parent's
 	// stays untouched on disk.
 	DaemonCapabilityCheckoutKeepsWorkV1 = "checkout-keeps-work-v1"
-	// DaemonCapabilityTaskSteerV1 advertises lossless human-comment delivery to
-	// an already-running Codex or Claude turn. Servers must fall back to the
-	// existing follow-up path when this capability is absent.
-	DaemonCapabilityTaskSteerV1 = "task-steer-v1"
+	// DaemonCapabilityTaskSupplementV1 advertises that this provider run can accept
+	// an additional text instruction without cancelling or starting a task.
+	// It is persisted when this exact task enters running; absence always means
+	// unsupported so mixed server/daemon versions fail closed.
+	DaemonCapabilityTaskSupplementV1 = "task-supplement-v1"
+
+	TaskSupplementFailureTurnNotStarted   = "turn_not_started"
+	TaskSupplementFailureProviderRejected = "provider_rejected"
+	TaskSupplementFailureTimeout          = "timeout"
+	TaskSupplementFailureTurnEnded        = "turn_ended"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
@@ -126,8 +132,9 @@ type TaskDispatchPayload struct {
 	Description string `json:"description"`
 }
 
-// TaskAvailablePayload is sent from server to daemon as a wakeup hint. The
-// daemon still claims work through the existing HTTP claim endpoint.
+// TaskAvailablePayload carries content-free task and supplement wakeup hints.
+// Supplement hints require an exact task ID; the daemon claims durable input
+// through the corresponding HTTP endpoint.
 type TaskAvailablePayload struct {
 	RuntimeID string `json:"runtime_id"`
 	TaskID    string `json:"task_id,omitempty"`
@@ -155,7 +162,6 @@ const (
 	PendingWorkKindModelList        = "model_list"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
-	PendingWorkKindTaskSteer        = "task_steer"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
