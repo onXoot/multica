@@ -104,7 +104,7 @@ export function createEnDict(
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 27 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 28 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -119,7 +119,7 @@ export function createEnDict(
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 27 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 28 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -139,7 +139,7 @@ export function createEnDict(
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 27 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 28 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -196,7 +196,7 @@ export function createEnDict(
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 27 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a QCA PAT and an existing QCA agent.",
+          "Multica supports 28 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a Qoder PAT and an existing agent in Qoder Cloud Agents.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -522,6 +522,56 @@ export function createEnDict(
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.7.0",
+        date: "2026-10-23",
+        title: "Workflows open to everyone, Qoder Cloud Agents, and runtimes shared with chosen members",
+        changes: [],
+        features: [
+          "Run Issues on Qoder Cloud Agents: when creating an agent, pick a machine or a cloud service, then link a Qoder Cloud Agents agent.",
+          "Qoder Cloud Agents connections support repo credentials, concurrency and timeout limits, pause and resume, disconnecting, and resuming sessions. For now they handle Issues only, not chat or local folders.",
+          "Share a runtime with specific members, not just everyone or only you. Tightening access shows the affected agents first.",
+          "Any member can create and duplicate workflows; creators and admins can edit, delete, and set up handoffs. The Default workflow stays with admins.",
+          "Agents can wake up when a linked GitHub PR hits a merge conflict, set from the sidebar or with --until-pr conflicts.",
+          "Kiro CLI 2.33.0 or later accepts new guidance mid-run, and Grok does too from the regular reply box.",
+          "Self-hosted admins can limit workspace creation to specific emails; everyone else can still sign in and join workspaces they are invited to.",
+          "The command line filters custom properties by number range, before or after a date, and text or URLs that contain a value.",
+        ],
+        improvements: [
+          "Icon buttons show clearer tooltips, with their name, shortcut, and why an action is unavailable, and the tooltips appear sooner.",
+          "Conversation starters moved to the agent's profile settings, save automatically, and show a new-chat preview.",
+          "Agent instructions have Write and Preview tabs, a character count, and a save bar that stays in view.",
+          "Board columns follow the workflow; restore hidden ones from Display → Columns, and use a status filter to find Issues outside the workflow.",
+          "With \"Create another\" on, the next Issue keeps its status, assignee, parent, and stage, and the More menu can create a sub-Issue directly.",
+          "Click the agent status at the top of an Issue to jump to its run in the execution log.",
+          "Embedded HTML previews can be reloaded to reset an interactive demo.",
+          "High priority is now orange, easier to tell apart from Medium's yellow, and small selects share one height.",
+          "When Hermes reinstalls its dependencies at startup, the daemon logs a warning and how long startup took, with a troubleshooting guide. The wait itself is not removed yet.",
+          "Self-hosted anonymous usage snapshots add bucketed counts of active members, with no member identities, and the privacy policy is updated.",
+          "The desktop app moves to Electron 44, along with security updates to Node and Go.",
+        ],
+        fixes: [
+          "Task credentials can no longer reach other workspaces or be swapped for long-lived ones, and a daemon can only claim and update tasks for runtimes its owner controls.",
+          "When an agent delivers to another branch or rewrites its starting point, Multica repairs it once if your base content is safe; failures show as local folder errors, not provider outages.",
+          "Removing injected instructions keeps the file's original line endings and your own edits, with no unrelated commits.",
+          "Kiro runs that panic fail quickly, and broken resumed sessions are retired instead of hanging.",
+          "OpenCode checks for future timestamps before resuming a session, and bundled OpenCode 2.x runs are no longer marked failed when the final step event is missing.",
+          "Cursor retries a limited number of times when the provider connection stalls, without mistaking local tool or MCP errors for network problems.",
+          "Hermes finds and applies the right reasoning effort for non-default models.",
+          "Kimi errors show what went wrong instead of [object Object].",
+          "A stuck task that fails for good leaves a failure note on the Issue.",
+          "A squad leader that is woken up keeps its leader role.",
+          "On Windows, startup no longer opens a flood of Git sign-in windows.",
+          "On Windows, WeCom media streams without extra downloads or leftover temporary files.",
+          "On mobile, reconnecting keeps your place instead of resetting navigation.",
+          "Bulk actions on sub-Issues work again, and the selection clears once an action succeeds.",
+          "The sticky comment header's shadow no longer covers the first line.",
+          "The saved views bar no longer crashes the page at certain widths.",
+          "Titles with line breaks or many spaces no longer freeze the page.",
+          "Hex strings in file paths are no longer misread as HTTP error codes once the daemon is updated.",
+          "Command line and daemon requests take less server work, easing a cause of server errors.",
+        ],
+      },
       {
         version: "0.6.5",
         date: "2026-10-21",
