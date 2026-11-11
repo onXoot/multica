@@ -73,6 +73,7 @@ interface LoginPageProps {
 
 export function redirectToCliCallback(url: string, token: string, state: string) {
   const separator = url.includes("?") ? "&" : "?";
+  // eslint-disable-next-line no-restricted-syntax -- CLI login runs in the web app only; the token must reach the CLI's local listener in this tab
   window.location.href = `${url}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(state)}`;
 }
 
@@ -265,6 +266,7 @@ export function LoginPage({
       const { authorization_url: authorizationURL } = await api.startOIDCLogin(
         oidc.appState ?? "",
       );
+      // eslint-disable-next-line no-restricted-syntax -- web OIDC redirect; Desktop passes onOIDCLogin and returns above
       window.location.href = authorizationURL;
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.errors.oidc_failed));

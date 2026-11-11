@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -64,9 +64,8 @@ const EMPTY_DRAFT: LabelDraft = {
 };
 
 /**
- * Search, create, edit and delete the labels of one catalog. Issue labels are
- * managed in Settings; skill labels on the Skills page, next to the skills
- * they tag — the two catalogs never mix.
+ * Search, create, edit and delete the labels of one catalog. Both catalogs are
+ * managed in Settings → Labels, one tab each — they never mix.
  */
 export function LabelManager({ scope }: { scope: LabelScope }) {
   const { t } = useT("settings");

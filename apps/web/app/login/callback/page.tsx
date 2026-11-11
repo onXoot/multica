@@ -19,7 +19,8 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "@multica/views/i18n";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@multica/ui/icons";
+import { CliCallbackError } from "@/features/auth/cli-callback-error";
 import { callbackErrorFrom, type CallbackError } from "./callback-error";
 
 const authLogger = createLogger("auth.callback");
@@ -98,13 +99,17 @@ function CallbackContent() {
         : stateParts.includes("platform:desktop")
           ? "desktop"
           : null;
+      // A cli_callback that fails validation must not silently fall back to
+      // the web flow: the CLI is waiting on a redirect that will never come.
+      const cliCallback =
+        cliCallbackRaw && validateCliCallback(cliCallbackRaw)
+          ? cliCallbackRaw
+          : null;
       return {
         handoffPlatform,
         nextUrl: sanitizeNextUrl(nextRaw),
-        cliCallback:
-          cliCallbackRaw && validateCliCallback(cliCallbackRaw)
-            ? cliCallbackRaw
-            : null,
+        cliCallback,
+        invalidCliCallback: cliCallbackPart !== undefined && cliCallback === null,
         cliState,
       };
     };
@@ -139,6 +144,10 @@ function CallbackContent() {
       loginWithOIDC(code, state)
         .then(({ user, token, appState }) => {
           const destination = parseAppState(appState);
+          if (destination.invalidCliCallback) {
+            setError({ kind: "invalid_cli_callback" });
+            return;
+          }
           if (destination.cliCallback) {
             redirectToCliCallback(
               destination.cliCallback,
@@ -166,6 +175,11 @@ function CallbackContent() {
 
     const destination = parseAppState(state);
     const handoffPlatform = destination.handoffPlatform;
+
+    if (destination.invalidCliCallback) {
+      setError({ kind: "invalid_cli_callback" });
+      return;
+    }
 
     if (destination.cliCallback) {
       // CLI login flow: exchange the Google code for a JWT, then redirect the
@@ -211,6 +225,8 @@ function CallbackContent() {
   const errorDescription = (() => {
     if (!error) return null;
     switch (error.kind) {
+      case "invalid_cli_callback":
+        return null;
       case "raw":
         return error.text;
       case "missing_code":
@@ -273,6 +289,8 @@ function CallbackContent() {
       </div>
     );
   }
+
+  if (error?.kind === "invalid_cli_callback") return <CliCallbackError />;
 
   if (error) {
     return (
