@@ -173,10 +173,10 @@ backend:
     cloud:
       url: ""
     googleClientId: ""
-    googleRedirectUri: http://multica.dev.lan/auth/callback
+    googleRedirectUri: http://multica.dev.lan/login/callback
     oidcIssuerUrl: ""
     oidcClientId: ""
-    oidcRedirectUri: http://multica.dev.lan/auth/callback
+    oidcRedirectUri: http://multica.dev.lan/login/callback
     oidcProviderName: OpenID Connect
     oidcScopes: openid profile email
     oidcAllowedGroups: ""

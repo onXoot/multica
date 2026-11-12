@@ -63,7 +63,7 @@ STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / 
 |----------|-------------|
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
-| `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g. `https://app.example.com/auth/callback`) |
+| `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g. `https://app.example.com/login/callback`) |
 
 Changes take effect after restarting the backend / compose stack. The web UI reads `GOOGLE_CLIENT_ID` from `/api/config` at runtime, so no web rebuild is needed.
 
